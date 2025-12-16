@@ -604,6 +604,7 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
                 memcpy(recv_buffer + buffer_data_len, temp_buffer, read_len);
                 buffer_data_len += read_len;
             } else {
+                printf("[WARNING] Receive buffer overflow, discarding data\n");
                 // 缓冲区被填满，重置以避免溢出
                 buffer_data_len = 0;
                 continue;
@@ -615,6 +616,7 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
                 int is_video = (memcmp(recv_buffer, PKG_VIDEO_PREFIX, 4) == 0);
                 if (!is_json && !is_video) {
                     // 跳过无效字节
+                    printf("[WARNING] Invalid package prefix, skipping 1 byte\n");
                     memmove(recv_buffer, recv_buffer + 1, buffer_data_len - 1);
                     buffer_data_len--;
                     continue;
@@ -622,9 +624,11 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
 
                 if (buffer_data_len < 4 + sizeof(TAG_PKG_HEADER_S)) break;
                 TAG_PKG_HEADER_S* header = (TAG_PKG_HEADER_S*)(recv_buffer + 4);
+                // 4+24+4 = 32
                 int pkg_len = 4 + sizeof(TAG_PKG_HEADER_S) + header->u16PkgLen + sizeof(TAG_PKG_TAIL_S);
-                if (pkg_len < 40 || pkg_len > RECV_BUFFER_SIZE) {
+                if (pkg_len <= 32 || pkg_len > RECV_BUFFER_SIZE) {
                     // 非法包长度，跳过前4字节
+                    printf("[WARNING] Invalid package length: %d (header->u16PkgLen=%d)\n", pkg_len, header->u16PkgLen);
                     memmove(recv_buffer, recv_buffer + 4, buffer_data_len - 4);
                     buffer_data_len -= 4;
                     continue;
@@ -846,10 +850,12 @@ int handle_video_package(VideoStreamManager* mgr,
             stream->video_height = video_header->u16VideoHeight;
             int display_width, display_height;
             if (stream->video_width > 1920) {
-                display_width = 1920; display_height = 1080;
+                display_width = 1920; 
+                display_height = 1080;
                 printf("[Stream%d] 4K detected, scaling to 1080p\n", stream_type);
             } else if (stream->video_width > 1280) {
-                display_width = 1280; display_height = 720;
+                display_width = 1280; 
+                display_height = 720;
                 printf("[Stream%d] 1080p detected, scaling to 720p\n", stream_type);
             } else {
                 display_width = stream->video_width; display_height = stream->video_height;
