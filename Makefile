@@ -12,7 +12,7 @@ INCLUDES = -IInclude
 TARGET = p2p-client.exe
 
 # Source files
-SOURCES = p2p-client.c video_decoder.c video_display_gdi.c control_panel.c
+SOURCES = p2p-client.c video_decoder.c video_display_gdi.c control_panel.c cJSON.c
 
 # Object files
 OBJECTS = $(SOURCES:.c=.o)

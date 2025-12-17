@@ -9,6 +9,7 @@
 #include "video_decoder.h"
 #include "video_display_gdi.h"
 #include "control_panel.h"
+#include "cJSON.h"
 
 // 定义常量
 #define CHANNEL 0                          // 通道号
@@ -597,8 +598,9 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
     while (g_net_thread_run) {
         unsigned char temp_buffer[BUFFER_SIZE];
         INT32 read_len = sizeof(temp_buffer);
-        INT32 ret = PPCS_Read(session_handle, CHANNEL, (char*)temp_buffer, &read_len, 1000);
-        if (ret == ERROR_PPCS_SUCCESSFUL && read_len > 0) {
+        INT32 ret = PPCS_Read(session_handle, CHANNEL, (char*)temp_buffer, &read_len, 500);
+        // 如果数据小于 BUFFER_SIZE, 返回的是 -3，所以 if (ret == ERROR_PPCS_SUCCESSFUL && read_len > 0) 这是不对的
+        if ((ret == ERROR_PPCS_SUCCESSFUL || ret == ERROR_PPCS_TIME_OUT) && read_len > 0) {
             // 追加到本地重组缓冲区
             if (buffer_data_len + read_len <= RECV_BUFFER_SIZE) {
                 memcpy(recv_buffer + buffer_data_len, temp_buffer, read_len);
@@ -699,12 +701,12 @@ void on_live_button_clicked(void* user_data) {
              "\"version\":\"1.0\","
              "\"ack\":false,"
              "\"seq\":%d,"
-             "\"cmd\":257,"
+             "\"cmd\":%d,"
              "\"def\":\"JSON_CMD_VIDEO_START\","
              "\"id\":\"%s\","
              "\"user\":\"%s\""
              "}",
-             s_global_seq++, id, user);
+             s_global_seq++, 0x101, id, user);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_VIDEO_START) == 0) {
         ctx->live_started = 1;
@@ -735,13 +737,13 @@ void on_playback_button_clicked(void* user_data) {
              "\"version\":\"1.0\","
              "\"ack\":false,"
              "\"seq\":%d,"
-             "\"cmd\":513,"
+             "\"cmd\":%d,"
              "\"def\":\"JSON_CMD_PLAYBACK_START\","
              "\"id\":\"%s\","
              "\"user\":\"%s\","
              "\"data\":{\"start_time\":\"%s\",\"end_time\":\"%s\"}"
              "}",
-             s_global_seq++, id, user, start_time, end_time);
+             s_global_seq++, 0x201, id, user, start_time, end_time);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_PLAYBACK_START) == 0) {
         ctx->playback_started = 1;
@@ -760,11 +762,21 @@ void on_record_list_button_clicked(void* user_data) {
     char json_request[MAX_JSON_LEN];
     const char* id = "Android_1c775ac30545f25a";
     const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
-    int starttime = 1765190126;
-    int endtime = 1765190136;
+    // 使用字符串时间格式 "YYYY-MM-DD HH:MM:SS"
+    const char* start_time_str = "2025-12-16 00:00:00";
+    const char* end_time_str   = "2025-12-16 14:50:00"; // 示例结束时间，可按需调整
     snprintf(json_request, sizeof(json_request),
-        "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":0x207,\"def\":\"JSON_CMD_RECORD_LIST_GET\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"starttime\":%d,\"endtime\":%d}}",
-        s_global_seq++, id, user, starttime, endtime);
+        "{"
+        "\"version\":\"1.0\","
+        "\"ack\":false,"
+        "\"seq\":%d,"
+        "\"cmd\":%d,"
+        "\"def\":\"JSON_CMD_RECORD_LIST_GET\","
+        "\"id\":\"%s\","
+        "\"user\":\"%s\","
+        "\"data\":{\"startTime\":\"%s\",\"endTime\":\"%s\"}"
+        "}",
+        s_global_seq++, 0x207, id, user, start_time_str, end_time_str);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, 0x207) != 0) {
         printf("[App] Failed to send record list command\n");
@@ -849,11 +861,12 @@ int handle_video_package(VideoStreamManager* mgr,
             stream->video_width = video_header->u16VideoWidth;
             stream->video_height = video_header->u16VideoHeight;
             int display_width, display_height;
-            if (stream->video_width > 1920) {
+            /*if (stream->video_width > 1920) {
                 display_width = 1920; 
                 display_height = 1080;
                 printf("[Stream%d] 4K detected, scaling to 1080p\n", stream_type);
-            } else if (stream->video_width > 1280) {
+            } else */
+            if (stream->video_width > 1280) {
                 display_width = 1280; 
                 display_height = 720;
                 printf("[Stream%d] 1080p detected, scaling to 720p\n", stream_type);
@@ -985,63 +998,57 @@ int handle_command_package(const unsigned char* package,
     
     printf("[Response] %s\n", json_response);
     
-    // 如果是录像列表响应（cmd=0x207 或 包体包含 JSON_CMD_RECORD_LIST_GET），解析并打印
+    // 如果是录像列表响应（cmd=0x207 或 包体包含 JSON_CMD_RECORD_LIST_GET），用 cJSON 解析新版格式
     if (header->u16PkgCmd == 0x207 || strstr(json_response, "JSON_CMD_RECORD_LIST_GET") != NULL) {
-        printf("[RecordList] Parsing record list response...\n");
-        // 轻量解析 record_list 数组
-        const char* p = strstr(json_response, "\"record_list\"");
-        if (!p) {
-            printf("[RecordList] No record_list found in response\n");
-        } else {
-            // 找到 '['
-            const char* arr = strchr(p, '[');
-            if (!arr) {
-                printf("[RecordList] Malformed record_list\n");
+        printf("[RecordList] Parsing record list response (cJSON)...\n");
+        // 解析 JSON
+        cJSON *root = cJSON_Parse(json_response);
+        if (!root) {
+            printf("[RecordList] Invalid JSON!\n");
+            return -1;
+        }
+        // 兼容 data/recordlist 或 data/record_list
+        cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+        if (!data) {
+            printf("[RecordList] No 'data' object in response\n");
+            cJSON_Delete(root);
+            return -1;
+        }
+        // 支持 recordlist/record_list
+        cJSON *recordlist = cJSON_GetObjectItemCaseSensitive(data, "recordlist");
+        if (!recordlist || !cJSON_IsArray(recordlist)) {
+            printf("[RecordList] No valid 'recordlist' array in response\n");
+            cJSON_Delete(root);
+            return -1;
+        }
+        int idx = 0;
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, recordlist) {
+            // 支持 startTime/start_time, endTime/end_time, recType/record_type
+            cJSON *start_time = cJSON_GetObjectItemCaseSensitive(item, "startTime");
+            cJSON *end_time = cJSON_GetObjectItemCaseSensitive(item, "endTime");
+            cJSON *rec_type = cJSON_GetObjectItemCaseSensitive(item, "recType");
+            cJSON *size = cJSON_GetObjectItemCaseSensitive(item, "size");
+            cJSON *frame_rate = cJSON_GetObjectItemCaseSensitive(item, "frameRate");
+            cJSON *code_type = cJSON_GetObjectItemCaseSensitive(item, "codeType");
+
+            if (start_time == NULL || end_time == NULL || rec_type == NULL 
+                || size == NULL || frame_rate == NULL || code_type == NULL) {
+                // 尝试下划线命名
+                printf("[RecordList][%d] Trying alternative field names...\n", idx);
             } else {
-                const char* cur = arr + 1;
-                int idx = 0;
-                while (cur && *cur) {
-                    // 查找下一个 '{'
-                    const char* obj = strchr(cur, '{');
-                    if (!obj) break;
-                    const char* end_obj = strchr(obj, '}');
-                    if (!end_obj) break;
-                    // 在 obj..end_obj 区间解析 start_time, end_time, record_type
-                    int start_time = 0, end_time = 0;
-                    char type_buf[64] = {0};
-                    const int seg_len = (int)(end_obj - obj + 1);
-                    char seg[512] = {0};
-                    int copy_len = seg_len < (int)sizeof(seg)-1 ? seg_len : (int)sizeof(seg)-1;
-                    memcpy(seg, obj, copy_len);
-                    seg[copy_len] = '\0';
-                    // start_time
-                    const char* ps = strstr(seg, "\"start_time\"");
-                    if (ps) sscanf(ps, "\"start_time\"%*[^0-9]%d", &start_time);
-                    const char* pe = strstr(seg, "\"end_time\"");
-                    if (pe) sscanf(pe, "\"end_time\"%*[^0-9]%d", &end_time);
-                    const char* pt = strstr(seg, "\"record_type\"");
-                    if (pt) {
-                        // 找到冒号后面的字符串
-                        const char* q = strchr(pt, ':');
-                        if (q) {
-                            // 跳过空格和引号
-                            q++;
-                            while (*q == ' ' || *q == '\"' || *q == '\t') q++;
-                            int i = 0;
-                            while (*q && *q != '"' && *q != ',' && *q != '}' && i < (int)sizeof(type_buf)-1) {
-                                type_buf[i++] = *q++;
-                            }
-                            type_buf[i] = '\0';
-                        }
-                    }
-                    printf("[RecordList][%d] start_time=%d, end_time=%d, type=%s\n", idx++, start_time, end_time, type_buf[0]?type_buf:"(unknown)");
-                    cur = end_obj + 1;
-                    // 跳过逗号和空白
-                    const char* comma = strchr(cur, ',');
-                    if (comma) cur = comma + 1;
-                }
+                    printf("[RecordList][%d] startTime=%s, endTime=%s, size=%u, recType=%d, frameRate=%d, codeType=%d\n",
+                    idx++,
+                    start_time && cJSON_IsString(start_time) ? start_time->valuestring : "",
+                    end_time && cJSON_IsString(end_time) ? end_time->valuestring : "",
+                    size && cJSON_IsNumber(size) ? (unsigned int)size->valuedouble : 0,
+                    rec_type && cJSON_IsNumber(rec_type) ? rec_type->valueint : -1,
+                    frame_rate && cJSON_IsNumber(frame_rate) ? frame_rate->valueint : -1,
+                    code_type && cJSON_IsNumber(code_type) ? code_type->valueint : -1
+                );         
             }
         }
+        cJSON_Delete(root);
         return 0;
     }
 
