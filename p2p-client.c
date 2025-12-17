@@ -1015,7 +1015,7 @@ int handle_command_package(const unsigned char* package,
             return -1;
         }
         // 支持 recordlist/record_list
-        cJSON *recordlist = cJSON_GetObjectItemCaseSensitive(data, "recordlist");
+        cJSON *recordlist = cJSON_GetObjectItemCaseSensitive(data, "recordList");
         if (!recordlist || !cJSON_IsArray(recordlist)) {
             printf("[RecordList] No valid 'recordlist' array in response\n");
             cJSON_Delete(root);
