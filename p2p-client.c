@@ -9,6 +9,7 @@
 #include "video_decoder.h"
 #include "video_display_gdi.h"
 #include "control_panel.h"
+#include "control_panel_tab.h"
 #include "cJSON.h"
 
 // 定义常量
@@ -742,6 +743,11 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
 int build_command_package(const char* json_data, unsigned char* package, int max_len,
                          unsigned short pkg_id, unsigned short pkg_cmd);
 int handle_command_package(const unsigned char* package, int pkg_len);
+void on_live_button_clicked(void* user_data);
+void on_live_stop_clicked(void* user_data);
+void on_playback_button_clicked(void* user_data);
+void on_record_list_button_clicked(void* user_data);
+
 // 统一封装：构建包并发送（封装 build_command_package + PPCS_Write）
 int send_command(INT32 session_handle, const char* json_data, unsigned short pkg_id, unsigned short pkg_cmd) {
     unsigned char package[BUFFER_SIZE];
@@ -759,6 +765,68 @@ int send_command(INT32 session_handle, const char* json_data, unsigned short pkg
 
     printf("[Command] Sent: %d bytes (pkg_id=%d, pkg_cmd=0x%04X)\n", ret, pkg_id, pkg_cmd);
     return 0;
+}
+
+// 统一的命令回调 - 处理所有命令交互
+void on_command_triggered(int command_id, void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) return;
+    
+    printf("[App] Command triggered: 0x%X\n", command_id);
+    
+    // 根据命令 ID 调用相应的处理函数
+    switch (command_id) {
+        case 0x101:  // CMD_LIVE_START
+            printf("[App] Live start command\n");
+            on_live_button_clicked(user_data);
+            break;
+            
+        case 0x102:  // CMD_LIVE_STOP
+            printf("[App] Live stop command\n");
+            on_live_stop_clicked(user_data);
+            break;
+            
+        case 0x201:  // CMD_PLAYBACK_START
+            printf("[App] Playback start command\n");
+            on_playback_button_clicked(user_data);
+            break;
+            
+        case 0x202:  // CMD_PLAYBACK_STOP
+            printf("[App] Playback stop command\n");
+            ctx->playback_started = 0;
+            printf("[App] Playback stopped\n");
+            break;
+            
+        case 0x203:  // CMD_PLAYBACK_PAUSE
+            printf("[App] Playback pause command (not yet implemented)\n");
+            break;
+            
+        case 0x204:  // CMD_PLAYBACK_RESUME
+            printf("[App] Playback resume command (not yet implemented)\n");
+            break;
+            
+        case 0x301:  // CMD_RECORD_LIST_GET
+            printf("[App] Record list get command\n");
+            on_record_list_button_clicked(user_data);
+            break;
+            
+        case 0x302:  // CMD_RECORD_PLAY
+            printf("[App] Record play command\n");
+            on_playback_button_clicked(user_data);
+            break;
+            
+        case 0x401:  // CMD_SETTINGS_SAVE
+            printf("[App] Settings save command (not yet implemented)\n");
+            break;
+            
+        case 0x402:  // CMD_SETTINGS_RESTORE
+            printf("[App] Settings restore command (not yet implemented)\n");
+            break;
+            
+        default:
+            printf("[App] Unknown command: 0x%X\n", command_id);
+            break;
+    }
 }
 
 // 直播按钮回调
@@ -792,6 +860,48 @@ void on_live_button_clicked(void* user_data) {
         printf("[App] Live stream started\n");
     } else {
         printf("[App] Failed to start live stream\n");
+    }
+}
+
+// 停止直播信令
+void on_live_stop_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx || !ctx->live_started) {
+        printf("[App] Live not started, skip stop\n");
+        return;
+    }
+
+    printf("[App] Stopping live stream...\n");
+
+    char json_request[MAX_JSON_LEN];
+    const char* id = "Android_1c775ac30545f25a";
+    const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
+
+    snprintf(json_request, sizeof(json_request),
+             "{"
+             "\"version\":\"1.0\"," 
+             "\"ack\":false," 
+             "\"seq\":%d," 
+             "\"cmd\":%d," 
+             "\"def\":\"JSON_CMD_VIDEO_STOP\"," 
+             "\"id\":\"%s\"," 
+             "\"user\":\"%s\""
+             "}",
+             s_global_seq++, 0x102, id, user);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_VIDEO_STOP) == 0) {
+        // 销毁直播流的显示/解码
+        if (ctx->video_mgr && ctx->video_mgr->streams[0]) {
+            destroy_video_stream(ctx->video_mgr->streams[0]);
+            ctx->video_mgr->streams[0] = NULL;
+            if (ctx->video_mgr->active_stream_count > 0) {
+                ctx->video_mgr->active_stream_count--;
+            }
+        }
+        ctx->live_started = 0;
+        printf("[App] Live stream stopped\n");
+    } else {
+        printf("[App] Failed to stop live stream\n");
     }
 }
 
@@ -1463,12 +1573,10 @@ int main(int argc, char* argv[]) {
     app_ctx.live_started = 0;
     app_ctx.playback_started = 0;
     
-    // 创建三按钮控制面板（直播 / 回放 / 录像列表）
-    ControlPanel* panel = control_panel_create_with_record_list(
-        "P2P 视频控制面板",
-        on_live_button_clicked,
-        on_playback_button_clicked,
-        on_record_list_button_clicked,
+    // 创建选项卡式控制面板（直播 / 回放 / 录像 / 设置）
+    ControlPanel* panel = control_panel_create_tabbed(
+        "P2P Client",
+        on_command_triggered,
         &app_ctx
     );
     

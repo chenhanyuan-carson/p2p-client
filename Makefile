@@ -3,9 +3,9 @@
 
 # Compiler settings
 CC = gcc
-CFLAGS = -Wall -O2 -DWIN32DLL -Iffmpeg/include
+CFLAGS = -Wall -O2 -DWIN32DLL -finput-charset=UTF-8 -fexec-charset=GBK -Iffmpeg/include
 LDFLAGS = -LLib -Lffmpeg/lib
-LIBS = -lPPCS_API -lavcodec -lavutil -lswscale -lws2_32 -lgdi32 -luser32
+LIBS = -lPPCS_API -lavcodec -lavutil -lswscale -lws2_32 -lgdi32 -luser32 -lcomctl32
 INCLUDES = -IInclude
 
 # Output directory
@@ -15,7 +15,7 @@ BIN_DIR = bin
 TARGET = $(BIN_DIR)/p2p-client.exe
 
 # Source files
-SOURCES = p2p-client.c video_decoder.c video_display_gdi.c control_panel.c cJSON.c
+SOURCES = p2p-client.c video_decoder.c video_display_gdi.c control_panel.c control_panel_tab.c cJSON.c
 
 # Object files
 OBJECTS = $(SOURCES:.c=.o)
