@@ -364,6 +364,85 @@ void print_network_info(st_PPCS_NetInfo* net_info) {
     printf("\n");
 }
 
+// 录像记录结构体
+typedef struct {
+    char start_time[64];                    // 开始时间
+    char end_time[64];                      // 结束时间
+    int rec_type;                           // 录制类型
+    unsigned int size;                      // 文件大小
+    int frame_rate;                         // 帧率
+    int code_type;                          // 编码类型
+} RecordItem;
+
+// 录像列表管理
+typedef struct {
+    RecordItem* items;                      // 录像记录数组
+    int count;                              // 当前记录数
+    int capacity;                           // 容量
+    int selected_idx;                       // 选中的索引（用于回放）
+} RecordList;
+
+// 全局录像列表
+static RecordList g_record_list = {NULL, 0, 0, -1};
+
+// 初始化录像列表
+void init_record_list(void) {
+    if (g_record_list.items == NULL) {
+        g_record_list.capacity = 100;
+        g_record_list.items = (RecordItem*)malloc(sizeof(RecordItem) * g_record_list.capacity);
+        g_record_list.count = 0;
+        g_record_list.selected_idx = -1;
+    }
+}
+
+// 清空录像列表
+void clear_record_list(void) {
+    g_record_list.count = 0;
+    g_record_list.selected_idx = -1;
+}
+
+// 添加录像记录
+void add_record_item(const char* start_time, const char* end_time, int rec_type,
+                     unsigned int size, int frame_rate, int code_type) {
+    if (g_record_list.count >= g_record_list.capacity) {
+        // 扩容
+        g_record_list.capacity *= 2;
+        g_record_list.items = (RecordItem*)realloc(g_record_list.items, 
+                                                   sizeof(RecordItem) * g_record_list.capacity);
+    }
+    
+    RecordItem* item = &g_record_list.items[g_record_list.count];
+    strncpy(item->start_time, start_time, sizeof(item->start_time) - 1);
+    item->start_time[sizeof(item->start_time) - 1] = '\0';
+    strncpy(item->end_time, end_time, sizeof(item->end_time) - 1);
+    item->end_time[sizeof(item->end_time) - 1] = '\0';
+    item->rec_type = rec_type;
+    item->size = size;
+    item->frame_rate = frame_rate;
+    item->code_type = code_type;
+    
+    g_record_list.count++;
+    printf("[RecordList] Added record %d: %s ~ %s\n", g_record_list.count - 1, start_time, end_time);
+}
+
+// 获取选中的录像记录
+RecordItem* get_selected_record(void) {
+    if (g_record_list.selected_idx >= 0 && g_record_list.selected_idx < g_record_list.count) {
+        return &g_record_list.items[g_record_list.selected_idx];
+    }
+    return NULL;
+}
+
+// 销毁录像列表
+void destroy_record_list(void) {
+    if (g_record_list.items) {
+        free(g_record_list.items);
+        g_record_list.items = NULL;
+        g_record_list.count = 0;
+        g_record_list.capacity = 0;
+    }
+}
+
 // 单个视频流的信息结构
 typedef struct {
     int stream_type;                        // 流类型: 1=主码流, 2=次码流, 3=录像流
@@ -725,13 +804,30 @@ void on_playback_button_clicked(void* user_data) {
     }
     
     printf("[App] Starting playback stream...\n");
+    
+    // 从保存的录像列表中获取选中的记录
+    RecordItem* selected = get_selected_record();
+    if (!selected) {
+        printf("[App] No record selected! Please query record list first.\n");
+        // 如果没有选中的记录，使用第一条记录
+        if (g_record_list.count > 0) {
+            printf("[App] Available records: %d, using first one...\n", g_record_list.count);
+            selected = &g_record_list.items[0];
+            g_record_list.selected_idx = 0;
+        } else {
+            printf("[App] No records available!\n");
+            return;
+        }
+    }
+    
     // 统一实现：构建 JSON 并通过 send_command 发送（回放）
     char json_request[MAX_JSON_LEN];
     const char* id = "Android_1c775ac30545f25a";
     const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
-    // 示例时间窗口（可按需修改或扩展为 UI 输入）
-    const char* start_time = "2024-01-01T12:00:00Z";
-    const char* end_time = "2024-01-01T12:30:00Z";
+    
+    // 使用保存的时间数据
+    const char* start_time = selected->start_time;
+    const char* end_time = selected->end_time;
     snprintf(json_request, sizeof(json_request),
              "{"
              "\"version\":\"1.0\","
@@ -741,9 +837,11 @@ void on_playback_button_clicked(void* user_data) {
              "\"def\":\"JSON_CMD_PLAYBACK_START\","
              "\"id\":\"%s\","
              "\"user\":\"%s\","
-             "\"data\":{\"start_time\":\"%s\",\"end_time\":\"%s\"}"
+             "\"data\":{\"startTime\":\"%s\",\"endTime\":\"%s\"}"
              "}",
              s_global_seq++, 0x201, id, user, start_time, end_time);
+    
+    printf("[App] Using saved record: %s ~ %s\n", start_time, end_time);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_PLAYBACK_START) == 0) {
         ctx->playback_started = 1;
@@ -758,13 +856,27 @@ void on_record_list_button_clicked(void* user_data) {
     AppContext* ctx = (AppContext*)user_data;
     if (!ctx) return;
     printf("[App] Querying record list (UI)...\n");
+    
+    // 清空旧的录像列表
+    clear_record_list();
+    printf("[App] Cleared previous record list\n");
+    
     // 构造JSON请求，字段按用户提供的协议
     char json_request[MAX_JSON_LEN];
     const char* id = "Android_1c775ac30545f25a";
     const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
+    
     // 使用字符串时间格式 "YYYY-MM-DD HH:MM:SS"
-    const char* start_time_str = "2025-12-16 00:00:00";
-    const char* end_time_str   = "2025-12-16 14:50:00"; // 示例结束时间，可按需调整
+    // 获取当前时间，回溯6小时
+    time_t now = time(NULL);
+    time_t start_time_t = now - 12 * 3600;  // 12小时前
+
+    char start_time_str[64] = "2025-12-19 00:00:00";
+    char end_time_str[64] = "2025-12-19 23:59:59";
+
+    strftime(start_time_str, sizeof(start_time_str), "%Y-%m-%d %H:%M:%S", localtime(&start_time_t));
+    strftime(end_time_str, sizeof(end_time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
     snprintf(json_request, sizeof(json_request),
         "{"
         "\"version\":\"1.0\","
@@ -782,7 +894,7 @@ void on_record_list_button_clicked(void* user_data) {
         printf("[App] Failed to send record list command\n");
         return;
     }
-    printf("[App] Record list command sent\n");
+    printf("[App] Record list command sent:%s\n", json_request);
 }
 
 // 处理视频数据包 - 支持多流分发
@@ -1037,17 +1149,29 @@ int handle_command_package(const unsigned char* package,
                 // 尝试下划线命名
                 printf("[RecordList][%d] Trying alternative field names...\n", idx);
             } else {
-                    printf("[RecordList][%d] startTime=%s, endTime=%s, size=%u, recType=%d, frameRate=%d, codeType=%d\n",
-                    idx++,
-                    start_time && cJSON_IsString(start_time) ? start_time->valuestring : "",
-                    end_time && cJSON_IsString(end_time) ? end_time->valuestring : "",
-                    size && cJSON_IsNumber(size) ? (unsigned int)size->valuedouble : 0,
-                    rec_type && cJSON_IsNumber(rec_type) ? rec_type->valueint : -1,
-                    frame_rate && cJSON_IsNumber(frame_rate) ? frame_rate->valueint : -1,
-                    code_type && cJSON_IsNumber(code_type) ? code_type->valueint : -1
-                );         
+                const char* start_str = start_time && cJSON_IsString(start_time) ? start_time->valuestring : "";
+                const char* end_str = end_time && cJSON_IsString(end_time) ? end_time->valuestring : "";
+                int rec_type_val = rec_type && cJSON_IsNumber(rec_type) ? rec_type->valueint : -1;
+                unsigned int size_val = size && cJSON_IsNumber(size) ? (unsigned int)size->valuedouble : 0;
+                int frame_rate_val = frame_rate && cJSON_IsNumber(frame_rate) ? frame_rate->valueint : -1;
+                int code_type_val = code_type && cJSON_IsNumber(code_type) ? code_type->valueint : -1;
+                
+                printf("[RecordList][%d] startTime=%s, endTime=%s, size=%u, recType=%d, frameRate=%d, codeType=%d\n",
+                    idx,
+                    start_str,
+                    end_str,
+                    size_val,
+                    rec_type_val,
+                    frame_rate_val,
+                    code_type_val
+                );
+                
+                // 保存录像记录
+                add_record_item(start_str, end_str, rec_type_val, size_val, frame_rate_val, code_type_val);
+                idx++;
             }
         }
+        printf("[RecordList] Total records saved: %d\n", g_record_list.count);
         cJSON_Delete(root);
         return 0;
     }
@@ -1239,6 +1363,10 @@ int main(int argc, char* argv[]) {
     
     // 打印配置信息
     print_config(&config);
+    
+    // 初始化录像列表
+    init_record_list();
+    printf("[App] Record list initialized\n\n");
     
     // 构建 JSON 初始化字符串（根据最新 API 版本）
     // 支持 API version >= 4.2.0 的 JSON 格式
@@ -1442,6 +1570,10 @@ int main(int argc, char* argv[]) {
     }
     if (g_pkg_event) { CloseHandle(g_pkg_event); g_pkg_event = NULL; }
     DeleteCriticalSection(&g_pkg_cs);
+    
+    // 清理录像列表
+    destroy_record_list();
+    printf("[App] Record list destroyed\n");
     
     // 反初始化 PPCS
     printf("Deinitializing PPCS API...\n");
