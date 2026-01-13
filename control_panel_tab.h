@@ -25,6 +25,7 @@ typedef enum {
     
     CMD_SETTINGS_SAVE = 0x401,
     CMD_SETTINGS_RESTORE = 0x402,
+    CMD_OTA_UPGRADE = 0x011,
 } CommandID;
 
 // 选项卡 ID

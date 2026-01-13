@@ -16,6 +16,7 @@
 #define IDC_RECORD_PLAY 1022
 #define IDC_SETTINGS_SAVE 1031
 #define IDC_SETTINGS_RESTORE 1032
+#define IDC_SETTINGS_OTA 1033
 #define IDC_STATUS_LABEL 2000
 
 // 每个选项卡的控件
@@ -119,6 +120,9 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             break;
                         case IDC_SETTINGS_RESTORE:
                             cmd_id = CMD_SETTINGS_RESTORE;
+                            break;
+                        case IDC_SETTINGS_OTA:
+                            cmd_id = CMD_OTA_UPGRADE;
                             break;
                         default:
                             return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -285,11 +289,21 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
             GetModuleHandle(NULL), NULL
         );
         SendMessage(btn_restore, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        HWND btn_ota = CreateWindowW(
+            L"BUTTON", L"OTA Upgrade",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            320, y_pos, 100, 35,
+            parent, (HMENU)IDC_SETTINGS_OTA,
+            GetModuleHandle(NULL), NULL
+        );
+        SendMessage(btn_ota, WM_SETFONT, (WPARAM)hFont, TRUE);
         
-        tab->button_count = 2;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 2);
+        tab->button_count = 3;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 3);
         tab->buttons[0] = btn_save;
         tab->buttons[1] = btn_restore;
+        tab->buttons[2] = btn_ota;
     }
 }
 
@@ -443,6 +457,7 @@ void control_panel_enable_command(ControlPanel* panel, int command_id, int enabl
         case CMD_RECORD_PLAY: control_id = IDC_RECORD_PLAY; break;
         case CMD_SETTINGS_SAVE: control_id = IDC_SETTINGS_SAVE; break;
         case CMD_SETTINGS_RESTORE: control_id = IDC_SETTINGS_RESTORE; break;
+        case CMD_OTA_UPGRADE: control_id = IDC_SETTINGS_OTA; break;
         default: return;
     }
     

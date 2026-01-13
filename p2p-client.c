@@ -25,6 +25,8 @@
 #define PKG_JSON_PREFIX "#nsj"                  // 包前缀
 #define PKG_VIDEO_PREFIX "$div"            // 视频包前缀
 #define MAX_VIDEO_FRAME_SIZE 1024*1024     // 最大视频帧大小（1MB）
+#define MAX_CMD_JSON_REASM (64 * 1024)     // 命令JSON分包重组最大长度
+#define CMD_JSON_REASM_SLOTS 8             // 同时在途的命令JSON重组槽位
 
 typedef enum {
     JSON_CMD_HEARTBEAT               = 0x01,  // 心跳包
@@ -76,6 +78,10 @@ typedef enum {
 static unsigned short s_global_pkg_id = 1;
 static unsigned short s_global_seq = 0;
 
+// 统一的设备/用户标识
+static const char* g_client_id = "Android_1c775ac30545f25a";
+static const char* g_client_user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
+
 // 网络读取线程 -> 完整包队列
 typedef struct PackageNode {
     unsigned char* data;
@@ -89,6 +95,106 @@ static CRITICAL_SECTION g_pkg_cs;
 static HANDLE g_pkg_event = NULL; // 用于唤醒
 static HANDLE g_net_thread = NULL;
 static volatile int g_net_thread_run = 0;
+
+// 命令 JSON 分包重组缓存（按 pkg_id）
+typedef struct {
+    unsigned short pkg_id;
+    size_t used;
+    size_t cap;
+    char* buf;
+    int active;
+} CmdJsonReasmSlot;
+
+static CmdJsonReasmSlot g_cmd_json_slots[CMD_JSON_REASM_SLOTS] = {0};
+
+static CmdJsonReasmSlot* get_cmd_json_slot(unsigned short pkg_id) {
+    CmdJsonReasmSlot* empty = NULL;
+    for (int i = 0; i < CMD_JSON_REASM_SLOTS; i++) {
+        if (g_cmd_json_slots[i].active && g_cmd_json_slots[i].pkg_id == pkg_id) {
+            return &g_cmd_json_slots[i];
+        }
+        if (!g_cmd_json_slots[i].active && empty == NULL) {
+            empty = &g_cmd_json_slots[i];
+        }
+    }
+    if (empty) {
+        memset(empty, 0, sizeof(*empty));
+        empty->pkg_id = pkg_id;
+        empty->active = 1;
+        return empty;
+    }
+    // 没有空槽位：简单策略，复用第一个
+    CmdJsonReasmSlot* slot = &g_cmd_json_slots[0];
+    slot->pkg_id = pkg_id;
+    slot->used = 0;
+    slot->active = 1;
+    return slot;
+}
+
+static void reset_cmd_json_slot(CmdJsonReasmSlot* slot) {
+    if (!slot) return;
+    slot->used = 0;
+    // buf/cap 保留复用，避免频繁malloc
+    slot->active = 0;
+    slot->pkg_id = 0;
+}
+
+// 追加 JSON 分片；若 index==0 则表示结束包并返回完整 JSON
+// out_json 指向内部缓存（下一次同 pkg_id 重组会覆盖）
+static int cmd_json_reasm_append(unsigned short pkg_id,
+                                unsigned short pkg_index,
+                                const char* fragment,
+                                int fragment_len,
+                                const char** out_json,
+                                int* out_len) {
+    if (!fragment || fragment_len <= 0) return 0;
+    CmdJsonReasmSlot* slot = get_cmd_json_slot(pkg_id);
+    if (!slot) return 0;
+
+    size_t needed = slot->used + (size_t)fragment_len + 1;
+    if (needed > MAX_CMD_JSON_REASM) {
+        printf("[Command] JSON reassembly overflow (pkg_id=%d, needed=%zu)\n", pkg_id, needed);
+        reset_cmd_json_slot(slot);
+        return 0;
+    }
+
+    if (slot->cap < needed) {
+        size_t new_cap = slot->cap ? slot->cap : 4096;
+        while (new_cap < needed) {
+            new_cap *= 2;
+            if (new_cap > MAX_CMD_JSON_REASM) {
+                new_cap = MAX_CMD_JSON_REASM;
+                break;
+            }
+        }
+        char* new_buf = (char*)realloc(slot->buf, new_cap);
+        if (!new_buf) {
+            printf("[Command] JSON reassembly OOM (pkg_id=%d, cap=%zu)\n", pkg_id, new_cap);
+            reset_cmd_json_slot(slot);
+            return 0;
+        }
+        slot->buf = new_buf;
+        slot->cap = new_cap;
+    }
+
+    memcpy(slot->buf + slot->used, fragment, (size_t)fragment_len);
+    slot->used += (size_t)fragment_len;
+    slot->buf[slot->used] = '\0';
+
+    if (pkg_index != 0) {
+        // 非结束包，继续等待
+        return 0;
+    }
+
+    if (out_json) *out_json = slot->buf;
+    if (out_len) *out_len = (int)slot->used;
+
+    // 结束包返回后重置 active（buf保留复用）
+    slot->active = 0;
+    slot->pkg_id = 0;
+    slot->used = 0;
+    return 1;
+}
 
 // 包头结构体
 #pragma pack(1)
@@ -369,6 +475,8 @@ void print_network_info(st_PPCS_NetInfo* net_info) {
 typedef struct {
     char start_time[64];                    // 开始时间
     char end_time[64];                      // 结束时间
+    long long start_ts;                     // 开始时间戳(秒)
+    long long end_ts;                       // 结束时间戳(秒)
     int rec_type;                           // 录制类型
     unsigned int size;                      // 文件大小
     int frame_rate;                         // 帧率
@@ -385,6 +493,35 @@ typedef struct {
 
 // 全局录像列表
 static RecordList g_record_list = {NULL, 0, 0, -1};
+
+// "YYYY-MM-DD HH:MM:SS" (local time) -> epoch seconds
+static int parse_datetime_local_to_epoch(const char* s, long long* out_ts) {
+    if (!s || !*s || !out_ts) return 0;
+    int y, mon, d, h, min, sec;
+    if (sscanf(s, "%d-%d-%d %d:%d:%d", &y, &mon, &d, &h, &min, &sec) != 6) return 0;
+    struct tm tmv;
+    memset(&tmv, 0, sizeof(tmv));
+    tmv.tm_year = y - 1900;
+    tmv.tm_mon = mon - 1;
+    tmv.tm_mday = d;
+    tmv.tm_hour = h;
+    tmv.tm_min = min;
+    tmv.tm_sec = sec;
+    tmv.tm_isdst = -1;
+    time_t t = mktime(&tmv);
+    if (t == (time_t)-1) return 0;
+    *out_ts = (long long)t;
+    return 1;
+}
+
+static void format_epoch_local(long long ts, char* out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    time_t t = (time_t)ts;
+    struct tm* tmv = localtime(&t);
+    if (!tmv) return;
+    strftime(out, out_len, "%Y-%m-%d %H:%M:%S", tmv);
+}
 
 // 初始化录像列表
 void init_record_list(void) {
@@ -404,6 +541,7 @@ void clear_record_list(void) {
 
 // 添加录像记录
 void add_record_item(const char* start_time, const char* end_time, int rec_type,
+                     long long start_ts, long long end_ts,
                      unsigned int size, int frame_rate, int code_type) {
     if (g_record_list.count >= g_record_list.capacity) {
         // 扩容
@@ -417,6 +555,8 @@ void add_record_item(const char* start_time, const char* end_time, int rec_type,
     item->start_time[sizeof(item->start_time) - 1] = '\0';
     strncpy(item->end_time, end_time, sizeof(item->end_time) - 1);
     item->end_time[sizeof(item->end_time) - 1] = '\0';
+    item->start_ts = start_ts;
+    item->end_ts = end_ts;
     item->rec_type = rec_type;
     item->size = size;
     item->frame_rate = frame_rate;
@@ -747,6 +887,7 @@ void on_live_button_clicked(void* user_data);
 void on_live_stop_clicked(void* user_data);
 void on_playback_button_clicked(void* user_data);
 void on_record_list_button_clicked(void* user_data);
+void on_ota_upgrade_clicked(void* user_data);
 
 // 统一封装：构建包并发送（封装 build_command_package + PPCS_Write）
 int send_command(INT32 session_handle, const char* json_data, unsigned short pkg_id, unsigned short pkg_cmd) {
@@ -822,6 +963,11 @@ void on_command_triggered(int command_id, void* user_data) {
         case 0x402:  // CMD_SETTINGS_RESTORE
             printf("[App] Settings restore command (not yet implemented)\n");
             break;
+
+        case CMD_OTA_UPGRADE:
+            printf("[App] OTA upgrade command\n");
+            on_ota_upgrade_clicked(user_data);
+            break;
             
         default:
             printf("[App] Unknown command: 0x%X\n", command_id);
@@ -840,9 +986,6 @@ void on_live_button_clicked(void* user_data) {
     printf("[App] Starting live stream...\n");
     // 统一实现：构建 JSON 并通过 send_command 发送
     char json_request[MAX_JSON_LEN];
-    // 使用空 id 与固定 user（与之前实现保持一致）
-    const char* id = "Android_1c775ac30545f25a";
-    const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
     snprintf(json_request, sizeof(json_request),
              "{"
              "\"version\":\"1.0\","
@@ -853,7 +996,7 @@ void on_live_button_clicked(void* user_data) {
              "\"id\":\"%s\","
              "\"user\":\"%s\""
              "}",
-             s_global_seq++, 0x101, id, user);
+             s_global_seq++, 0x101, g_client_id, g_client_user);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_VIDEO_START) == 0) {
         ctx->live_started = 1;
@@ -874,9 +1017,6 @@ void on_live_stop_clicked(void* user_data) {
     printf("[App] Stopping live stream...\n");
 
     char json_request[MAX_JSON_LEN];
-    const char* id = "Android_1c775ac30545f25a";
-    const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
-
     snprintf(json_request, sizeof(json_request),
              "{"
              "\"version\":\"1.0\"," 
@@ -887,7 +1027,7 @@ void on_live_stop_clicked(void* user_data) {
              "\"id\":\"%s\"," 
              "\"user\":\"%s\""
              "}",
-             s_global_seq++, 0x102, id, user);
+             s_global_seq++, 0x102, g_client_id, g_client_user);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_VIDEO_STOP) == 0) {
         // 销毁直播流的显示/解码
@@ -932,12 +1072,14 @@ void on_playback_button_clicked(void* user_data) {
     
     // 统一实现：构建 JSON 并通过 send_command 发送（回放）
     char json_request[MAX_JSON_LEN];
-    const char* id = "Android_1c775ac30545f25a";
-    const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
-    
-    // 使用保存的时间数据
-    const char* start_time = selected->start_time;
-    const char* end_time = selected->end_time;
+
+    // 使用保存的时间戳数据（协议要求使用 timestamp）
+    long long start_ts = selected->start_ts;
+    long long end_ts = selected->end_ts;
+    if (start_ts <= 0 || end_ts <= 0) {
+        printf("[App] Selected record has no valid timestamps, fallback to string time may fail. start_ts=%lld end_ts=%lld\n",
+               start_ts, end_ts);
+    }
     snprintf(json_request, sizeof(json_request),
              "{"
              "\"version\":\"1.0\","
@@ -947,11 +1089,12 @@ void on_playback_button_clicked(void* user_data) {
              "\"def\":\"JSON_CMD_PLAYBACK_START\","
              "\"id\":\"%s\","
              "\"user\":\"%s\","
-             "\"data\":{\"startTime\":\"%s\",\"endTime\":\"%s\"}"
+             "\"data\":{\"startTime\":%lld,\"endTime\":%lld}"
              "}",
-             s_global_seq++, 0x201, id, user, start_time, end_time);
+             s_global_seq++, 0x201, g_client_id, g_client_user, start_ts, end_ts);
     
-    printf("[App] Using saved record: %s ~ %s\n", start_time, end_time);
+    printf("[App] Using saved record: %s ~ %s (ts=%lld~%lld)\n",
+           selected->start_time, selected->end_time, start_ts, end_ts);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_PLAYBACK_START) == 0) {
         ctx->playback_started = 1;
@@ -973,19 +1116,12 @@ void on_record_list_button_clicked(void* user_data) {
     
     // 构造JSON请求，字段按用户提供的协议
     char json_request[MAX_JSON_LEN];
-    const char* id = "Android_1c775ac30545f25a";
-    const char* user = "29566628-5071-47e7-b5f5-9cc3849c9ade";
     
-    // 使用字符串时间格式 "YYYY-MM-DD HH:MM:SS"
-    // 获取当前时间，回溯6小时
+    // 使用时间戳(秒)
     time_t now = time(NULL);
     time_t start_time_t = now - 12 * 3600;  // 12小时前
-
-    char start_time_str[64] = "2025-12-19 00:00:00";
-    char end_time_str[64] = "2025-12-19 23:59:59";
-
-    strftime(start_time_str, sizeof(start_time_str), "%Y-%m-%d %H:%M:%S", localtime(&start_time_t));
-    strftime(end_time_str, sizeof(end_time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    long long start_ts = (long long)start_time_t;
+    long long end_ts = (long long)now;
 
     snprintf(json_request, sizeof(json_request),
         "{"
@@ -996,15 +1132,54 @@ void on_record_list_button_clicked(void* user_data) {
         "\"def\":\"JSON_CMD_RECORD_LIST_GET\","
         "\"id\":\"%s\","
         "\"user\":\"%s\","
-        "\"data\":{\"startTime\":\"%s\",\"endTime\":\"%s\"}"
+        "\"data\":{\"startTime\":%lld,\"endTime\":%lld}"
         "}",
-        s_global_seq++, 0x207, id, user, start_time_str, end_time_str);
+        s_global_seq++, 0x207, g_client_id, g_client_user, start_ts, end_ts);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, 0x207) != 0) {
         printf("[App] Failed to send record list command\n");
         return;
     }
     printf("[App] Record list command sent:%s\n", json_request);
+}
+
+// 固件升级按钮回调
+void on_ota_upgrade_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) return;
+
+    printf("[App] Triggering OTA upgrade...\n");
+
+    const char* url = "http://192.168.0.26/ab2132a0-b116-4609-be15-82a3fc5efe3b.bin";
+    const char* version = "1.0.0";
+    const char* md5 = "acec3e2015a8c23d326794a53d17d984";
+    const int size = 11520904;
+
+    char json_request[MAX_JSON_LEN];
+    snprintf(json_request, sizeof(json_request),
+             "{"
+             "\"version\":\"1.0\","\
+             "\"ack\":false,"\
+             "\"seq\":%d,"\
+             "\"cmd\":%d,"\
+             "\"def\":\"JSON_CMD_OTA\","\
+             "\"id\":\"%s\","\
+             "\"user\":\"%s\","\
+             "\"data\":{"
+                 "\"mode\":0,"
+                 "\"url\":\"%s\","
+                 "\"version\":\"%s\","
+                 "\"md5\":\"%s\","
+                 "\"size\":%d"
+             "}"
+             "}",
+             s_global_seq++, JSON_CMD_OTA, g_client_id, g_client_user, url, version, md5, size);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_OTA) == 0) {
+        printf("[App] OTA upgrade command sent: %s\n", json_request);
+    } else {
+        printf("[App] Failed to send OTA upgrade command\n");
+    }
 }
 
 // 处理视频数据包 - 支持多流分发
@@ -1207,17 +1382,31 @@ int handle_command_package(const unsigned char* package,
     offset += sizeof(TAG_PKG_HEADER_S);
     
     int json_len = header->u16PkgLen;
-    
-    // 提取JSON
-    char json_response[MAX_JSON_LEN];
-    if (json_len > MAX_JSON_LEN - 1) {
-        printf("[Command] JSON too large\n");
+
+    // 提取 JSON 分片（注意：命令 JSON 也可能分包）
+    // 校验边界：至少要有 json_len 字节负载
+    if (json_len < 0 || offset + json_len > pkg_len) {
+        printf("[Command] Invalid json_len=%d (pkg_len=%d, offset=%d)\n", json_len, pkg_len, offset);
         return -1;
     }
-    
-    memcpy(json_response, package + offset, json_len);
-    json_response[json_len] = '\0';
-    
+
+    const char* assembled_json = NULL;
+    int assembled_len = 0;
+    int is_complete = cmd_json_reasm_append(header->u16PkgId,
+                                           header->u16PkgIndex,
+                                           (const char*)(package + offset),
+                                           json_len,
+                                           &assembled_json,
+                                           &assembled_len);
+    if (!is_complete) {
+        printf("[Command] JSON fragment buffered (pkg_id=%d, pkg_index=%d, frag_len=%d)\n",
+               header->u16PkgId, header->u16PkgIndex, json_len);
+        return 0;
+    }
+
+    // assembled_json 指向重组完成的 JSON 字符串
+    const char* json_response = assembled_json;
+    printf("[Command] JSON response reassembled (length=%d):\n", assembled_len);
     printf("[Response] %s\n", json_response);
     
     // 如果是录像列表响应（cmd=0x207 或 包体包含 JSON_CMD_RECORD_LIST_GET），用 cJSON 解析新版格式
@@ -1248,28 +1437,53 @@ int handle_command_package(const unsigned char* package,
         cJSON_ArrayForEach(item, recordlist) {
             // 支持 startTime/start_time, endTime/end_time, recType/record_type
             cJSON *start_time = cJSON_GetObjectItemCaseSensitive(item, "startTime");
+            if (!start_time) start_time = cJSON_GetObjectItemCaseSensitive(item, "start_time");
             cJSON *end_time = cJSON_GetObjectItemCaseSensitive(item, "endTime");
+            if (!end_time) end_time = cJSON_GetObjectItemCaseSensitive(item, "end_time");
             cJSON *rec_type = cJSON_GetObjectItemCaseSensitive(item, "recType");
+            if (!rec_type) rec_type = cJSON_GetObjectItemCaseSensitive(item, "record_type");
             cJSON *size = cJSON_GetObjectItemCaseSensitive(item, "size");
             cJSON *frame_rate = cJSON_GetObjectItemCaseSensitive(item, "frameRate");
+            if (!frame_rate) frame_rate = cJSON_GetObjectItemCaseSensitive(item, "frame_rate");
             cJSON *code_type = cJSON_GetObjectItemCaseSensitive(item, "codeType");
+            if (!code_type) code_type = cJSON_GetObjectItemCaseSensitive(item, "code_type");
 
             if (start_time == NULL || end_time == NULL || rec_type == NULL 
                 || size == NULL || frame_rate == NULL || code_type == NULL) {
-                // 尝试下划线命名
-                printf("[RecordList][%d] Trying alternative field names...\n", idx);
+                printf("[RecordList][%d] Missing required fields, skip\n", idx);
             } else {
-                const char* start_str = start_time && cJSON_IsString(start_time) ? start_time->valuestring : "";
-                const char* end_str = end_time && cJSON_IsString(end_time) ? end_time->valuestring : "";
+                char start_str_buf[64] = {0};
+                char end_str_buf[64] = {0};
+                long long start_ts = 0;
+                long long end_ts = 0;
+
+                if (cJSON_IsNumber(start_time)) {
+                    start_ts = (long long)start_time->valuedouble;
+                    format_epoch_local(start_ts, start_str_buf, sizeof(start_str_buf));
+                } else if (cJSON_IsString(start_time) && start_time->valuestring) {
+                    strncpy(start_str_buf, start_time->valuestring, sizeof(start_str_buf) - 1);
+                    parse_datetime_local_to_epoch(start_str_buf, &start_ts);
+                }
+
+                if (cJSON_IsNumber(end_time)) {
+                    end_ts = (long long)end_time->valuedouble;
+                    format_epoch_local(end_ts, end_str_buf, sizeof(end_str_buf));
+                } else if (cJSON_IsString(end_time) && end_time->valuestring) {
+                    strncpy(end_str_buf, end_time->valuestring, sizeof(end_str_buf) - 1);
+                    parse_datetime_local_to_epoch(end_str_buf, &end_ts);
+                }
+
                 int rec_type_val = rec_type && cJSON_IsNumber(rec_type) ? rec_type->valueint : -1;
                 unsigned int size_val = size && cJSON_IsNumber(size) ? (unsigned int)size->valuedouble : 0;
                 int frame_rate_val = frame_rate && cJSON_IsNumber(frame_rate) ? frame_rate->valueint : -1;
                 int code_type_val = code_type && cJSON_IsNumber(code_type) ? code_type->valueint : -1;
                 
-                printf("[RecordList][%d] startTime=%s, endTime=%s, size=%u, recType=%d, frameRate=%d, codeType=%d\n",
+                printf("[RecordList][%d] startTime=%s(%lld), endTime=%s(%lld), size=%u, recType=%d, frameRate=%d, codeType=%d\n",
                     idx,
-                    start_str,
-                    end_str,
+                    start_str_buf,
+                    start_ts,
+                    end_str_buf,
+                    end_ts,
                     size_val,
                     rec_type_val,
                     frame_rate_val,
@@ -1277,7 +1491,7 @@ int handle_command_package(const unsigned char* package,
                 );
                 
                 // 保存录像记录
-                add_record_item(start_str, end_str, rec_type_val, size_val, frame_rate_val, code_type_val);
+                add_record_item(start_str_buf, end_str_buf, rec_type_val, start_ts, end_ts, size_val, frame_rate_val, code_type_val);
                 idx++;
             }
         }
