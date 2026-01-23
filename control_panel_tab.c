@@ -17,6 +17,7 @@
 #define IDC_SETTINGS_SAVE 1031
 #define IDC_SETTINGS_RESTORE 1032
 #define IDC_SETTINGS_OTA 1033
+#define IDC_SNAPSHOT_IMG 1034
 #define IDC_STATUS_LABEL 2000
 
 // 每个选项卡的控件
@@ -114,6 +115,9 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             break;
                         case IDC_RECORD_PLAY:
                             cmd_id = CMD_RECORD_PLAY;
+                            break;
+                        case IDC_SNAPSHOT_IMG:
+                            cmd_id = CMD_SNAPSHOT_IMG;
                             break;
                         case IDC_SETTINGS_SAVE:
                             cmd_id = CMD_SETTINGS_SAVE;
@@ -265,10 +269,20 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
         );
         SendMessage(btn_play, WM_SETFONT, (WPARAM)hFont, TRUE);
         
-        tab->button_count = 2;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 2);
+        HWND btn_snapshot = CreateWindowW(
+            L"BUTTON", L"Snapshot",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            330, y_pos, 120, 35,
+            parent, (HMENU)IDC_SNAPSHOT_IMG,
+            GetModuleHandle(NULL), NULL
+        );
+        SendMessage(btn_snapshot, WM_SETFONT, (WPARAM)hFont, TRUE);
+        
+        tab->button_count = 3;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 3);
         tab->buttons[0] = btn_list;
         tab->buttons[1] = btn_play;
+        tab->buttons[2] = btn_snapshot;
     }
     else if (tab_id == TAB_SETTINGS) {
         // 设置选项卡
@@ -455,6 +469,7 @@ void control_panel_enable_command(ControlPanel* panel, int command_id, int enabl
         case CMD_PLAYBACK_RESUME: control_id = IDC_PLAYBACK_RESUME; break;
         case CMD_RECORD_LIST_GET: control_id = IDC_RECORD_LIST; break;
         case CMD_RECORD_PLAY: control_id = IDC_RECORD_PLAY; break;
+        case CMD_SNAPSHOT_IMG: control_id = IDC_SNAPSHOT_IMG; break;
         case CMD_SETTINGS_SAVE: control_id = IDC_SETTINGS_SAVE; break;
         case CMD_SETTINGS_RESTORE: control_id = IDC_SETTINGS_RESTORE; break;
         case CMD_OTA_UPGRADE: control_id = IDC_SETTINGS_OTA; break;

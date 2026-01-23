@@ -71,7 +71,8 @@ typedef enum {
     JSON_CMD_TIMELAPSE_DOWNLOAD      = 0x304, // 下载延时摄影文件
 
     JSON_CMD_AUTOPHOTO_GET           = 0x311, // 获取自动拍照设置
-    JSON_CMD_AUTOPHOTO_SET           = 0x312  // 设置自动拍照参数
+    JSON_CMD_AUTOPHOTO_SET           = 0x312, // 设置自动拍照参数
+    JSON_CMD_SNAPSHOT_IMG            = 0x313  // 抓图
 } ELD_CMD_CODE;
 
 // 全局序号管理（用于统一的 JSON seq / pkg id）
@@ -627,24 +628,35 @@ const char* get_stream_type_name(int stream_type) {
 }
 
 // 创建单个视频流
-VideoStream* create_video_stream(int stream_type, const char* output_file_prefix) {
+VideoStream* create_video_stream(int stream_type, const char* output_file_prefix, int codec_type) {
     VideoStream* stream = (VideoStream*)malloc(sizeof(VideoStream));
     if (!stream) return NULL;
     
     memset(stream, 0, sizeof(VideoStream));
     stream->stream_type = stream_type;
+    stream->codec_type = codec_type;
     
-    // 根据流类型创建不同的输出文件
-    char filename[256];
-    snprintf(filename, sizeof(filename), "%s_stream%d.h265", 
-             output_file_prefix, stream_type);
-    
-    stream->output_file = fopen(filename, "wb");
-    if (!stream->output_file) {
-        printf("[Stream%d] Warning: Failed to open output file: %s\n", 
-               stream_type, filename);
+    // 根据编码类型决定文件扩展名
+    const char* extension;
+    if (codec_type == 3) {
+        extension = "jpg";  // JPEG编码 - 不需要连续文件，每个帧单独保存
+        stream->output_file = NULL; // JPEG不需要连续文件
+        printf("[Stream%d] JPEG stream initialized (frames saved individually)\n", stream_type);
     } else {
-        printf("[Stream%d] Output file created: %s\n", stream_type, filename);
+        extension = "h265"; // 默认H.265 - 需要连续文件
+        
+        // 根据流类型创建不同的输出文件
+        char filename[256];
+        snprintf(filename, sizeof(filename), "%s_stream%d.%s", 
+                 output_file_prefix, stream_type, extension);
+        
+        stream->output_file = fopen(filename, "wb");
+        if (!stream->output_file) {
+            printf("[Stream%d] Warning: Failed to open output file: %s\n", 
+                   stream_type, filename);
+        } else {
+            printf("[Stream%d] Output file created: %s\n", stream_type, filename);
+        }
     }
     
     return stream;
@@ -690,7 +702,7 @@ VideoStreamManager* create_video_stream_manager(const char* output_file_prefix) 
 
 // 获取或创建指定类型的流
 VideoStream* get_or_create_stream(VideoStreamManager* mgr, int stream_type, 
-                                  const char* output_file_prefix) {
+                                  const char* output_file_prefix, int codec_type) {
     if (!mgr || stream_type < 1 || stream_type > 5) {
         return NULL;
     }
@@ -701,7 +713,7 @@ VideoStream* get_or_create_stream(VideoStreamManager* mgr, int stream_type,
     }
     
     // 创建新流
-    VideoStream* stream = create_video_stream(stream_type, output_file_prefix);
+    VideoStream* stream = create_video_stream(stream_type, output_file_prefix, codec_type);
     if (stream) {
         mgr->streams[stream_type - 1] = stream;
         mgr->active_stream_count++;
@@ -735,12 +747,41 @@ void destroy_video_stream_manager(VideoStreamManager* mgr) {
 void save_video_frame(VideoStream* stream, 
                      const unsigned char* frame_data,
                      int frame_size) {
-    if (!stream || !stream->output_file) return;
+    if (!stream) return;
     
-    size_t written = fwrite(frame_data, 1, frame_size, stream->output_file);
-    if (written != frame_size) {
-        printf("[Stream%d] ERROR: Failed to write video frame\n", stream->stream_type);
-        return;
+    // 对于JPEG编码，每个帧保存为单独的文件
+    if (stream->codec_type == 3) {
+        char filename[256];
+        snprintf(filename, sizeof(filename), "output_video_stream%d_frame%06d.jpg", 
+                 stream->stream_type, stream->frame_count);
+        
+        FILE* jpg_file = fopen(filename, "wb");
+        if (!jpg_file) {
+            printf("[Stream%d] ERROR: Failed to create JPEG file: %s\n", 
+                   stream->stream_type, filename);
+            return;
+        }
+        
+        size_t written = fwrite(frame_data, 1, frame_size, jpg_file);
+        fclose(jpg_file);
+        
+        if (written != frame_size) {
+            printf("[Stream%d] ERROR: Failed to write JPEG frame to %s\n", 
+                   stream->stream_type, filename);
+            return;
+        }
+        
+        printf("[Stream%d] JPEG saved: %s (%d bytes)\n", 
+               stream->stream_type, filename, frame_size);
+    } else {
+        // 对于视频编码，连续写入文件
+        if (!stream->output_file) return;
+        
+        size_t written = fwrite(frame_data, 1, frame_size, stream->output_file);
+        if (written != frame_size) {
+            printf("[Stream%d] ERROR: Failed to write video frame\n", stream->stream_type);
+            return;
+        }
     }
     
     stream->total_bytes += frame_size;
@@ -888,6 +929,7 @@ void on_live_stop_clicked(void* user_data);
 void on_playback_button_clicked(void* user_data);
 void on_record_list_button_clicked(void* user_data);
 void on_ota_upgrade_clicked(void* user_data);
+void on_snapshot_img_clicked(void* user_data);
 
 // 统一封装：构建包并发送（封装 build_command_package + PPCS_Write）
 int send_command(INT32 session_handle, const char* json_data, unsigned short pkg_id, unsigned short pkg_cmd) {
@@ -954,6 +996,11 @@ void on_command_triggered(int command_id, void* user_data) {
         case 0x302:  // CMD_RECORD_PLAY
             printf("[App] Record play command\n");
             on_playback_button_clicked(user_data);
+            break;
+            
+        case 0x313:  // CMD_SNAPSHOT_IMG
+            printf("[App] Snapshot image command\n");
+            on_snapshot_img_clicked(user_data);
             break;
             
         case 0x401:  // CMD_SETTINGS_SAVE
@@ -1182,6 +1229,33 @@ void on_ota_upgrade_clicked(void* user_data) {
     }
 }
 
+// 抓图按钮回调
+void on_snapshot_img_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) return;
+
+    printf("[App] Triggering snapshot image...\n");
+
+    char json_request[MAX_JSON_LEN];
+    snprintf(json_request, sizeof(json_request),
+             "{"
+             "\"version\":\"1.0\","
+             "\"ack\":false,"
+             "\"seq\":%d,"
+             "\"cmd\":%d,"
+             "\"def\":\"JSON_CMD_SNAPSHOT_IMG\","
+             "\"id\":\"%s\","
+             "\"user\":\"%s\""
+             "}",
+             s_global_seq++, JSON_CMD_SNAPSHOT_IMG, g_client_id, g_client_user);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_SNAPSHOT_IMG) == 0) {
+        printf("[App] Snapshot image command sent: %s\n", json_request);
+    } else {
+        printf("[App] Failed to send snapshot image command\n");
+    }
+}
+
 // 处理视频数据包 - 支持多流分发
 int handle_video_package(VideoStreamManager* mgr,
                         const unsigned char* package,
@@ -1247,7 +1321,7 @@ int handle_video_package(VideoStreamManager* mgr,
                 video_header->u16VideoWidth, video_header->u16VideoHeight,
                 video_header->u8FrameRate, video_header->s32FrameLen);
         }
-        stream = get_or_create_stream(mgr, stream_type, "output_video");
+        stream = get_or_create_stream(mgr, stream_type, "output_video", video_header->s8EncodeType);
         if (!stream) {
             printf("[Video] Failed to get stream for type %d\n", stream_type);
             return -1;
@@ -1257,38 +1331,44 @@ int handle_video_package(VideoStreamManager* mgr,
             stream->codec_type = video_header->s8EncodeType;
             stream->video_width = video_header->u16VideoWidth;
             stream->video_height = video_header->u16VideoHeight;
-            int display_width, display_height;
-            /*if (stream->video_width > 1920) {
-                display_width = 1920; 
-                display_height = 1080;
-                printf("[Stream%d] 4K detected, scaling to 1080p\n", stream_type);
-            } else */
-            if (stream->video_width > 1280) {
-                display_width = 1280; 
-                display_height = 720;
-                printf("[Stream%d] 1080p detected, scaling to 720p\n", stream_type);
+            
+            // 对于JPEG编码（类型3），不需要解码器和显示，直接保存文件
+            if (video_header->s8EncodeType == 3) {
+                printf("[Stream%d] JPEG detected, will save directly without decoding\n", stream_type);
             } else {
-                display_width = stream->video_width; display_height = stream->video_height;
-                printf("[Stream%d] Resolution acceptable, no scaling\n", stream_type);
-            }
-            char window_title[128];
-            snprintf(window_title, sizeof(window_title), "P2P %s - %dx%d",
-                get_stream_type_name(stream_type), display_width, display_height);
-            printf("[Stream%d] Creating display window (%dx%d)...\n", stream_type, display_width, display_height);
-            stream->display = video_display_create(window_title, display_width, display_height);
-            if (!stream->display) {
-                printf("[Stream%d] Warning: Failed to create display window\n", stream_type);
-            }
-            printf("[Stream%d] Creating decoder (type: %d) with callback...\n", stream_type, stream->codec_type);
-            stream->decoder = video_decoder_create(stream->codec_type, on_frame_decoded, stream);
-            if (!stream->decoder) {
-                printf("[Stream%d] Warning: Failed to create decoder\n", stream_type);
-            } else {
-                if (display_width != stream->video_width || display_height != stream->video_height) {
-                    printf("[Stream%d] Setting decoder scale: %dx%d -> %dx%d\n", stream_type, stream->video_width, stream->video_height, display_width, display_height);
-                    int ret = video_decoder_set_scale(stream->decoder, display_width, display_height);
-                    if (ret < 0) {
-                        printf("[Stream%d] Warning: Failed to set scale\n", stream_type);
+                int display_width, display_height;
+                /*if (stream->video_width > 1920) {
+                    display_width = 1920; 
+                    display_height = 1080;
+                    printf("[Stream%d] 4K detected, scaling to 1080p\n", stream_type);
+                } else */
+                if (stream->video_width > 1280) {
+                    display_width = 1280; 
+                    display_height = 720;
+                    printf("[Stream%d] 1080p detected, scaling to 720p\n", stream_type);
+                } else {
+                    display_width = stream->video_width; display_height = stream->video_height;
+                    printf("[Stream%d] Resolution acceptable, no scaling\n", stream_type);
+                }
+                char window_title[128];
+                snprintf(window_title, sizeof(window_title), "P2P %s - %dx%d",
+                    get_stream_type_name(stream_type), display_width, display_height);
+                printf("[Stream%d] Creating display window (%dx%d)...\n", stream_type, display_width, display_height);
+                stream->display = video_display_create(window_title, display_width, display_height);
+                if (!stream->display) {
+                    printf("[Stream%d] Warning: Failed to create display window\n", stream_type);
+                }
+                printf("[Stream%d] Creating decoder (type: %d) with callback...\n", stream_type, stream->codec_type);
+                stream->decoder = video_decoder_create(stream->codec_type, on_frame_decoded, stream);
+                if (!stream->decoder) {
+                    printf("[Stream%d] Warning: Failed to create decoder\n", stream_type);
+                } else {
+                    if (display_width != stream->video_width || display_height != stream->video_height) {
+                        printf("[Stream%d] Setting decoder scale: %dx%d -> %dx%d\n", stream_type, stream->video_width, stream->video_height, display_width, display_height);
+                        int ret = video_decoder_set_scale(stream->decoder, display_width, display_height);
+                        if (ret < 0) {
+                            printf("[Stream%d] Warning: Failed to set scale\n", stream_type);
+                        }
                     }
                 }
             }
@@ -1307,16 +1387,23 @@ int handle_video_package(VideoStreamManager* mgr,
             memcpy(frame_buf.data + frame_buf.used_len, package + offset, video_data_len);
             frame_buf.used_len += video_data_len;
         }
-        // 如果是最后一片，送解码器
+        // 如果是最后一片，送解码器或直接保存JPEG
         if (header->u16PkgIndex == 0) {
             if (frame_buf.valid && frame_buf.used_len > 0) {
                 save_video_frame(frame_buf.stream, frame_buf.data, frame_buf.used_len);
                 frame_buf.stream->frame_count++;
                 frame_buf.stream->total_bytes += frame_buf.used_len;
                 uint64_t pts = frame_buf.video_header.u64Pts;
-                int ret = video_decoder_decode(frame_buf.stream->decoder, frame_buf.data, frame_buf.used_len, pts);
-                if (ret < 0) {
-                    printf("[Stream%d] Warning: Decode error %d\n", frame_buf.stream->stream_type, ret);
+                
+                // 对于JPEG编码，直接保存不解码
+                if (frame_buf.stream->codec_type == 3) {
+                    printf("[Stream%d] JPEG frame saved directly (size: %d bytes)\n", 
+                           frame_buf.stream->stream_type, frame_buf.used_len);
+                } else {
+                    int ret = video_decoder_decode(frame_buf.stream->decoder, frame_buf.data, frame_buf.used_len, pts);
+                    if (ret < 0) {
+                        printf("[Stream%d] Warning: Decode error %d\n", frame_buf.stream->stream_type, ret);
+                    }
                 }
             }
             frame_buf.valid = 0;
@@ -1336,16 +1423,23 @@ int handle_video_package(VideoStreamManager* mgr,
             memcpy(frame_buf.data + frame_buf.used_len, package + offset, video_data_len);
             frame_buf.used_len += video_data_len;
         }
-        // 如果是最后一片，送解码器
+        // 如果是最后一片，送解码器或直接保存JPEG
         if (header->u16PkgIndex == 0) {
             if (frame_buf.valid && frame_buf.used_len > 0) {
                 save_video_frame(frame_buf.stream, frame_buf.data, frame_buf.used_len);
                 frame_buf.stream->frame_count++;
                 frame_buf.stream->total_bytes += frame_buf.used_len;
                 uint64_t pts = frame_buf.video_header.u64Pts;
-                int ret = video_decoder_decode(frame_buf.stream->decoder, frame_buf.data, frame_buf.used_len, pts);
-                if (ret < 0) {
-                    printf("[Stream%d] Warning: Decode error %d\n", frame_buf.stream->stream_type, ret);
+                
+                // 对于JPEG编码，直接保存不解码
+                if (frame_buf.stream->codec_type == 3) {
+                    printf("[Stream%d] JPEG frame saved directly (size: %d bytes)\n", 
+                           frame_buf.stream->stream_type, frame_buf.used_len);
+                } else {
+                    int ret = video_decoder_decode(frame_buf.stream->decoder, frame_buf.data, frame_buf.used_len, pts);
+                    if (ret < 0) {
+                        printf("[Stream%d] Warning: Decode error %d\n", frame_buf.stream->stream_type, ret);
+                    }
                 }
             }
             frame_buf.valid = 0;
@@ -1383,6 +1477,10 @@ int handle_command_package(const unsigned char* package,
     
     int json_len = header->u16PkgLen;
 
+    // 不包括头长度的数据长度（prefix+header 后剩余的 payload，通常包含 JSON + tail）
+    int payload_len = pkg_len - offset;
+    if (payload_len < 0) payload_len = 0;
+
     // 提取 JSON 分片（注意：命令 JSON 也可能分包）
     // 校验边界：至少要有 json_len 字节负载
     if (json_len < 0 || offset + json_len > pkg_len) {
@@ -1399,13 +1497,14 @@ int handle_command_package(const unsigned char* package,
                                            &assembled_json,
                                            &assembled_len);
     if (!is_complete) {
-        printf("[Command] JSON fragment buffered (pkg_id=%d, pkg_index=%d, frag_len=%d)\n",
-               header->u16PkgId, header->u16PkgIndex, json_len);
+         printf("[Command] JSON fragment buffered (pkg_id=%d, pkg_index=%d, payload_len=%d, frag_len=%d)\n",
+             header->u16PkgId, header->u16PkgIndex, payload_len, json_len);
         return 0;
     }
 
     // assembled_json 指向重组完成的 JSON 字符串
     const char* json_response = assembled_json;
+    printf("[Command] Data length (exclude prefix+header)=%d bytes\n", payload_len);
     printf("[Command] JSON response reassembled (length=%d):\n", assembled_len);
     printf("[Response] %s\n", json_response);
     

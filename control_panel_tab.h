@@ -22,6 +22,7 @@ typedef enum {
     
     CMD_RECORD_LIST_GET = 0x301,
     CMD_RECORD_PLAY = 0x302,
+    CMD_SNAPSHOT_IMG = 0x313,
     
     CMD_SETTINGS_SAVE = 0x401,
     CMD_SETTINGS_RESTORE = 0x402,
