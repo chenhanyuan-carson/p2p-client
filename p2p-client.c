@@ -24,6 +24,7 @@
 #define PKG_IDENT 0x876e                   // 包标识 "IO"
 #define PKG_JSON_PREFIX "#nsj"                  // 包前缀
 #define PKG_VIDEO_PREFIX "$div"            // 视频包前缀
+#define PICTURE_HEAD "$gmi"                // 图片包前缀
 #define MAX_VIDEO_FRAME_SIZE 1024*1024     // 最大视频帧大小（1MB）
 #define MAX_CMD_JSON_REASM (64 * 1024)     // 命令JSON分包重组最大长度
 #define CMD_JSON_REASM_SLOTS 8             // 同时在途的命令JSON重组槽位
@@ -233,6 +234,18 @@ typedef struct {
     unsigned short u16VideoHeight;         // 视频高
     unsigned long long u64Pts;             // 帧时间戳
 } TAG_PKG_VIDEO_HEADER_S;
+
+// 图片包头结构体
+typedef struct {
+    char s8ImageType;                      // 图片类型
+    char s8EncodeType;                     // 编码类型: 1:JPEG, 2:PNG, 3:BMP
+    char s8Ch;                             // 通道
+    char s8Reserve;                        // 保留
+    unsigned short u16Width;               // 图片宽度
+    unsigned short u16Height;              // 图片高度
+    int s32ImageLen;                       // 图片数据长度
+    unsigned long long u64Pts;             // 时间戳
+} TAG_PKG_IMAGE_HEADER_S;
 #pragma pack()
 
 // 配置结构体
@@ -877,7 +890,8 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
             while (buffer_data_len >= 40) {
                 int is_json = (memcmp(recv_buffer, PKG_JSON_PREFIX, 4) == 0);
                 int is_video = (memcmp(recv_buffer, PKG_VIDEO_PREFIX, 4) == 0);
-                if (!is_json && !is_video) {
+                int is_image = (memcmp(recv_buffer, PICTURE_HEAD, 4) == 0);
+                if (!is_json && !is_video && !is_image) {
                     // 跳过无效字节
                     printf("[WARNING] Invalid package prefix, skipping 1 byte\n");
                     memmove(recv_buffer, recv_buffer + 1, buffer_data_len - 1);
@@ -1254,6 +1268,144 @@ void on_snapshot_img_clicked(void* user_data) {
     } else {
         printf("[App] Failed to send snapshot image command\n");
     }
+}
+
+// 处理图片数据包
+int handle_image_package(const unsigned char* package, int pkg_len) {
+    if (pkg_len < 4 + sizeof(TAG_PKG_HEADER_S) + sizeof(TAG_PKG_TAIL_S)) {
+        printf("[Image] Package too small\n");
+        return -1;
+    }
+
+    int offset = 4;  // 跳过 $gmi 前缀
+    const TAG_PKG_HEADER_S* header = (const TAG_PKG_HEADER_S*)(package + offset);
+    offset += sizeof(TAG_PKG_HEADER_S);
+
+    // 打印包头信息
+    printf("[Image] Received package - PkgId:%d, Index:%d, SubHead:%d, PkgLen:%d\n",
+           header->u16PkgId, header->u16PkgIndex, header->u8PkgSubHead, header->u16PkgLen);
+
+    typedef struct {
+        unsigned short pkg_id;
+        int total_len;
+        int used_len;
+        unsigned char data[MAX_VIDEO_FRAME_SIZE];  // 复用视频的缓存大小
+        char filename[256];
+        int has_header;
+        TAG_PKG_IMAGE_HEADER_S image_header;
+    } ImageBuffer;
+    static ImageBuffer image_buf = {0};
+
+    // 检查缓存状态，如果不一致则清空（防止残留数据）
+    if (image_buf.pkg_id != 0 && image_buf.pkg_id != header->u16PkgId) {
+        printf("[Image] WARNING - Package ID mismatch (cache:%d != new:%d), clearing cache\n",
+               image_buf.pkg_id, header->u16PkgId);
+        memset(&image_buf, 0, sizeof(image_buf));
+    }
+    else if (image_buf.used_len > image_buf.total_len * 2 && image_buf.total_len > 0) {
+        printf("[Image] WARNING - Buffer state inconsistent (used:%d >> total:%d), clearing\n",
+               image_buf.used_len, image_buf.total_len);
+        memset(&image_buf, 0, sizeof(image_buf));
+    }
+
+    // 处理第一个包（包含图片头）
+    if (header->u8PkgSubHead == 1) {
+        if (header->u16PkgLen < sizeof(TAG_PKG_IMAGE_HEADER_S)) {
+            printf("[Image] First package too small for image header\n");
+            return -1;
+        }
+
+        // 解析图片头
+        const TAG_PKG_IMAGE_HEADER_S* image_header = (const TAG_PKG_IMAGE_HEADER_S*)(package + offset);
+        offset += sizeof(TAG_PKG_IMAGE_HEADER_S);
+
+        // 初始化图片缓存
+        image_buf.pkg_id = header->u16PkgId;
+        image_buf.total_len = image_header->s32ImageLen;
+        image_buf.used_len = 0;
+        image_buf.has_header = 1;
+        memcpy(&image_buf.image_header, image_header, sizeof(TAG_PKG_IMAGE_HEADER_S));
+
+        // 生成文件名
+        const char* ext = (image_header->s8EncodeType == 0) ? "jpg" : "png";
+        time_t now = time(NULL);
+        struct tm* tm_info = localtime(&now);
+        char time_str[32];
+        strftime(time_str, sizeof(time_str), "%Y%m%d_%H%M%S", tm_info);
+
+        snprintf(image_buf.filename, sizeof(image_buf.filename), "snapshot_ch%d_%s_%llu.%s",
+                image_header->s8Ch, time_str, image_header->u64Pts, ext);
+
+        printf("[Image] Start new image: %s (total %d bytes, type:%d, encode:%d, %dx%d)\n",
+               image_buf.filename, image_buf.total_len, image_header->s8ImageType,
+               image_header->s8EncodeType, image_header->u16Width, image_header->u16Height);
+
+        // 第一个包只有图片头，没有数据
+        return 0;
+    }
+
+    // 处理后续数据包
+    if (header->u8PkgSubHead == 0) {
+        // 检查是否是有效的后续包
+        if (image_buf.pkg_id == 0 || image_buf.pkg_id != header->u16PkgId) {
+            printf("[Image] Received data package but no valid image header (PkgId:%d, cache:%d)\n",
+                   header->u16PkgId, image_buf.pkg_id);
+            return -1;
+        }
+
+        // 计算数据长度
+        int data_len = header->u16PkgLen;
+        if (data_len <= 0) {
+            printf("[Image] No data in package\n");
+            return -1;
+        }
+
+        // 检查是否有足够空间
+        if (image_buf.used_len + data_len > MAX_VIDEO_FRAME_SIZE) {
+            printf("[Image] Image too large, discarding\n");
+            memset(&image_buf, 0, sizeof(image_buf));
+            return -1;
+        }
+
+        // 累加数据
+        memcpy(image_buf.data + image_buf.used_len, package + offset, data_len);
+        image_buf.used_len += data_len;
+
+        printf("[Image] Accumulated %d/%d bytes for PkgId %d\n",
+               image_buf.used_len, image_buf.total_len, image_buf.pkg_id);
+
+        // 检查是否是最后一个包 (PkgIndex == 0)
+        if (header->u16PkgIndex == 0) {
+            printf("[Image] Final package received, saving image: %s\n", image_buf.filename);
+
+            // 完整图片已接收，保存到文件
+            FILE* image_file = fopen(image_buf.filename, "wb");
+            if (!image_file) {
+                printf("[Image] Failed to create image file: %s\n", image_buf.filename);
+                memset(&image_buf, 0, sizeof(image_buf));
+                return -1;
+            }
+
+            size_t written = fwrite(image_buf.data, 1, image_buf.used_len, image_file);
+            fclose(image_file);
+
+            if (written != image_buf.used_len) {
+                printf("[Image] Failed to write image data to %s\n", image_buf.filename);
+                memset(&image_buf, 0, sizeof(image_buf));
+                return -1;
+            }
+
+            printf("[Image] Saved complete image: %s (%zu bytes)\n", image_buf.filename, written);
+
+            // 清空缓存，为下一个图片做准备
+            memset(&image_buf, 0, sizeof(image_buf));
+        }
+
+        return data_len;
+    }
+
+    printf("[Image] Unknown SubHead value: %d\n", header->u8PkgSubHead);
+    return -1;
 }
 
 // 处理视频数据包 - 支持多流分发
@@ -1940,9 +2092,13 @@ int main(int argc, char* argv[]) {
             int pkg_len = node->len;
 
             int is_json = (memcmp(pkg, PKG_JSON_PREFIX, 4) == 0);
+            int is_image = (memcmp(pkg, PICTURE_HEAD, 4) == 0);
+            int is_video = (memcmp(pkg, PKG_VIDEO_PREFIX, 4) == 0);
             if (is_json) {
                 handle_command_package(pkg, pkg_len);
-            } else {
+            } else if (is_image) {
+                handle_image_package(pkg, pkg_len);
+            } else if (is_video) {
                 handle_video_package(video_mgr, pkg, pkg_len);
             }
 
