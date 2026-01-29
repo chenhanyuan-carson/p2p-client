@@ -55,13 +55,16 @@ LRESULT CALLBACK ControlPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             break;
             
         case WM_CLOSE:
+            printf("[Debug] WM_CLOSE received in control_panel for hwnd: %p\n", hwnd);
             if (g_panel) {
+                printf("[Debug] g_panel->running set to 0\n");
                 g_panel->running = 0;
             }
             DestroyWindow(hwnd);
             break;
             
         case WM_DESTROY:
+            printf("[Debug] WM_DESTROY received in control_panel for hwnd: %p\n", hwnd);
             PostQuitMessage(0);
             break;
             
@@ -224,8 +227,11 @@ int control_panel_poll_events(ControlPanel* panel) {
     MSG msg;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) {
+            printf("[Debug] WM_QUIT received in control_panel_poll_events\n");
             panel->running = 0;
             return 0;
+        } else {
+            //printf("[Debug] Message received: 0x%X\n", msg.message);
         }
         
         TranslateMessage(&msg);
@@ -249,9 +255,14 @@ void control_panel_update_buttons(ControlPanel* panel, int live_enabled, int pla
  * 销毁控制面板
  */
 void control_panel_destroy(ControlPanel* panel) {
+    printf("[Debug] control_panel_destroy called\n");
+    if (panel && panel->hwnd) {
+        printf("[Debug] Destroying window with hwnd: %p\n", panel->hwnd);
+    }
     if (!panel) return;
     
     if (panel->hwnd) {
+        printf("[Debug] DestroyWindow called in control_panel for hwnd: %p\n", panel->hwnd);
         DestroyWindow(panel->hwnd);
     }
     

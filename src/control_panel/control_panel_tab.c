@@ -140,13 +140,17 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         }
         
         case WM_CLOSE:
+            printf("[Debug] WM_CLOSE triggered\n");
             if (g_panel) {
+                printf("[Debug] g_panel->running set to 0\n");
                 g_panel->running = 0;
             }
+            printf("[Debug] DestroyWindow called in control_panel_tab for hwnd: %p\n", hwnd);
             DestroyWindow(hwnd);
             break;
             
         case WM_DESTROY:
+            printf("[Debug] WM_DESTROY received in control_panel_tab for hwnd: %p\n", hwnd);
             PostQuitMessage(0);
             break;
             

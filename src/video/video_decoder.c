@@ -129,16 +129,16 @@ VideoDecoder* video_decoder_create(int codec_type,
  * 输入编码数据到解码器
  */
 int video_decoder_decode(VideoDecoder* decoder, 
-                        const uint8_t* data, 
-                        int size, 
+                        const unsigned char* data, 
+                        int len, 
                         int64_t pts) {
     if (!decoder || !decoder->initialized) {
         return -1;
     }
     
     // 使用解析器解析数据流
-    const uint8_t* parse_data = data;
-    int parse_size = size;
+    const uint8_t* parse_data = (const uint8_t*)data;
+    int parse_size = len;
     int total_decoded = 0;
     
     while (parse_size > 0) {

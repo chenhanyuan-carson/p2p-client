@@ -1,12 +1,11 @@
-# Makefile for P2P project with FFmpeg and Windows GDI
-# For MSYS64/MinGW environment
+# Updated Makefile for modular structure
 
 # Compiler settings
 CC = gcc
 CFLAGS = -Wall -O2 -DWIN32DLL -finput-charset=UTF-8 -fexec-charset=GBK -Iffmpeg/include
 LDFLAGS = -LLib -Lffmpeg/lib
 LIBS = -lPPCS_API -lavcodec -lavutil -lswscale -lws2_32 -lgdi32 -luser32 -lcomctl32
-INCLUDES = -IInclude
+INCLUDES = -I. -IInclude -Isrc/ppcs -Isrc/json -Isrc/image -Isrc/video -Isrc/signaling -Isrc/app -Isrc/control_panel
 
 # Output directory
 BIN_DIR = bin
@@ -15,7 +14,17 @@ BIN_DIR = bin
 TARGET = $(BIN_DIR)/p2p-client.exe
 
 # Source files
-SOURCES = p2p-client.c video_decoder.c video_display_gdi.c control_panel.c control_panel_tab.c cJSON.c
+SOURCES = \
+	src/main.c \
+	src/ppcs/ppcs_core.c \
+	src/signaling/command_handler.c \
+	src/image/image_handler.c \
+	src/video/video_manager.c \
+	src/video/video_decoder.c \
+	src/video/video_display.c \
+	src/control_panel/control_panel.c \
+	src/control_panel/control_panel_tab.c \
+	src/json/cJSON.c
 
 # Object files
 OBJECTS = $(SOURCES:.c=.o)
@@ -34,7 +43,7 @@ $(TARGET): $(OBJECTS) | $(BIN_DIR)
 	@echo "Build successful!"
 
 # Compile source files
-%.o: %.c
+$(OBJECTS): %.o: %.c
 	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 

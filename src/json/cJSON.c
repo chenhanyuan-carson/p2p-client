@@ -1,13 +1,8 @@
-/* Minimal cJSON.c for basic object/array/string/number parsing */
+/* Migrated cJSON.c into src/json */
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
-/* For brevity, this is a minimal implementation for demo/testing only. */
-
-/* ... Full implementation should be replaced for production ... */
-
 #include <ctype.h>
 
 static void skip_ws(const char **p) { while (**p && isspace(**p)) (*p)++; }
@@ -143,6 +138,7 @@ void cJSON_Delete(cJSON *c) {
     if (c->string) free(c->string);
     free(c);
 }
+
 // 辅助函数：去除前后空白
 static const char* cjson_trim(const char* s, int* len) {
     while (*s && (unsigned char)*s <= 32) s++;
@@ -168,12 +164,6 @@ cJSON *cJSON_GetObjectItemCaseSensitive(const cJSON *object, const char *string)
     return NULL;
 }
 
-int cJSON_IsArray(const cJSON *const item) {
-    return item && item->type == cJSON_Array;
-}
-int cJSON_IsNumber(const cJSON *const item) {
-    return item && item->type == cJSON_Number;
-}
-int cJSON_IsString(const cJSON *const item) {
-    return item && item->type == cJSON_String;
-}
+int cJSON_IsArray(const cJSON *const item) { return item && item->type == cJSON_Array; }
+int cJSON_IsNumber(const cJSON *const item) { return item && item->type == cJSON_Number; }
+int cJSON_IsString(const cJSON *const item) { return item && item->type == cJSON_String; }

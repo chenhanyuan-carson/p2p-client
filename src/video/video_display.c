@@ -1,4 +1,5 @@
-#include "video_display_gdi.h"
+// Video Display Implementation
+#include "video_display.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +41,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
             
         case WM_DESTROY:
-            PostQuitMessage(0);
+            // Removed unnecessary debug information
             return 0;
             
         case WM_KEYDOWN:
@@ -304,6 +305,7 @@ void video_display_destroy(VideoDisplay* display) {
     }
     
     if (display->hwnd) {
+        printf("[Debug] DestroyWindow called in video_display for hwnd: %p\n", display->hwnd);
         DestroyWindow(display->hwnd);
     }
     
