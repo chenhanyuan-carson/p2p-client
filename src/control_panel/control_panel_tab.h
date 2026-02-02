@@ -12,6 +12,8 @@ typedef void (*TabChangedCallback)(int tab_id, void* user_data);
 
 // 命令 ID 定义（用于区分不同的交互）
 typedef enum {
+    CMD_GET_DEVICE_CONFIG = 0x02,
+
     CMD_LIVE_START = 0x101,
     CMD_LIVE_STOP = 0x102,
     

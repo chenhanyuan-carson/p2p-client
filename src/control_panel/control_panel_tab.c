@@ -19,6 +19,7 @@
 #define IDC_SETTINGS_OTA 1033
 #define IDC_SNAPSHOT_IMG 1034
 #define IDC_STATUS_LABEL 2000
+#define IDC_GET_DEVICE_CONFIG 2001
 
 // 每个选项卡的控件
 typedef struct {
@@ -127,6 +128,9 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             break;
                         case IDC_SETTINGS_OTA:
                             cmd_id = CMD_OTA_UPGRADE;
+                            break;
+                        case IDC_GET_DEVICE_CONFIG:
+                            cmd_id = CMD_GET_DEVICE_CONFIG;
                             break;
                         default:
                             return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -290,19 +294,24 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
     }
     else if (tab_id == TAB_SETTINGS) {
         // 设置选项卡
+        // Adjust positions of buttons in the Settings tab to avoid overlap
+        int y_offset = 85;
+        int button_height = 35;
+        int button_spacing = 10;
+
         HWND btn_save = CreateWindowW(
             L"BUTTON", L"Save Settings",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            80, y_pos, 100, 35,
+            80, y_offset, 150, button_height,
             parent, (HMENU)IDC_SETTINGS_SAVE,
             GetModuleHandle(NULL), NULL
         );
         SendMessage(btn_save, WM_SETFONT, (WPARAM)hFont, TRUE);
-        
+
         HWND btn_restore = CreateWindowW(
             L"BUTTON", L"Restore Default",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            200, y_pos, 100, 35,
+            80, y_offset + button_height + button_spacing, 150, button_height,
             parent, (HMENU)IDC_SETTINGS_RESTORE,
             GetModuleHandle(NULL), NULL
         );
@@ -311,17 +320,27 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
         HWND btn_ota = CreateWindowW(
             L"BUTTON", L"OTA Upgrade",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            320, y_pos, 100, 35,
+            80, y_offset + 2 * (button_height + button_spacing), 150, button_height,
             parent, (HMENU)IDC_SETTINGS_OTA,
             GetModuleHandle(NULL), NULL
         );
         SendMessage(btn_ota, WM_SETFONT, (WPARAM)hFont, TRUE);
-        
-        tab->button_count = 3;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 3);
+
+        HWND btnGetDeviceConfig = CreateWindow(
+            "BUTTON", "Get Device Info", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            80, y_offset + 3 * (button_height + button_spacing), 150, button_height,
+            parent, (HMENU)IDC_GET_DEVICE_CONFIG, (HINSTANCE)GetWindowLongPtr(parent, GWLP_HINSTANCE), NULL);
+        if (!btnGetDeviceConfig) {
+            printf("[UI] ERROR: Failed to create Get Device Info button\n");
+        }
+        SendMessage(btnGetDeviceConfig, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        tab->button_count = 4;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 4);
         tab->buttons[0] = btn_save;
         tab->buttons[1] = btn_restore;
         tab->buttons[2] = btn_ota;
+        tab->buttons[3] = btnGetDeviceConfig;
     }
 }
 

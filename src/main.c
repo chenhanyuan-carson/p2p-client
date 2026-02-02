@@ -53,22 +53,12 @@ int main(int argc, char* argv[]) {
 
     time_t start_time = time(NULL);
     while (1) {
-        if (time(NULL) - start_time > 600) {
-            printf("[Debug] Exiting main loop: timeout reached\n");
-            break;
-        }
-        if (!control_panel_poll_events(panel)) {
-            printf("[Debug] Exiting main loop: control_panel_poll_events failed\n");
-            break;
-        }
-        if (!video_manager_poll_events(video_mgr)) {
-            printf("[Debug] Exiting main loop: video_manager_poll_events failed\n");
-            break;
-        }
+        if (time(NULL) - start_time > 600) break;
+        if (!control_panel_poll_events(panel)) break;
+        if (!video_manager_poll_events(video_mgr)) break;
         int processed = 0; const int MAX_PROC_PER_LOOP = 8;
         while (processed < MAX_PROC_PER_LOOP) {
-            PackageNode* node = ppcs_pop_package();
-            if (!node) break;
+            PackageNode* node = ppcs_pop_package(); if (!node) break;
             unsigned char* pkg = node->data; int pkg_len = node->len;
             int is_json = (memcmp(pkg, "#nsj", 4) == 0);
             int is_image = (memcmp(pkg, "$gmi", 4) == 0);
@@ -80,8 +70,6 @@ int main(int argc, char* argv[]) {
         Sleep(1);
     }
 
-    printf("[Debug] Program exiting: cleaning up resources\n");
-    printf("[Debug] Destroying control panel\n");
     control_panel_destroy(panel);
     destroy_video_stream_manager(video_mgr);
     PPCS_Close(session_handle);

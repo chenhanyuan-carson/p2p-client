@@ -167,6 +167,42 @@ int handle_command_package(const unsigned char* package, int pkg_len) {
         cJSON_Delete(root);
         return 0;
     }
+    if (header->u16PkgCmd == JSON_CMD_SETTINGS_GET) {
+        cJSON* root = cJSON_Parse(json_response);
+        if (!root) return -1;
+
+        cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+        if (data) {
+            cJSON* devName = cJSON_GetObjectItemCaseSensitive(data, "devName");
+            cJSON* devType = cJSON_GetObjectItemCaseSensitive(data, "devType");
+            cJSON* devMacAddr = cJSON_GetObjectItemCaseSensitive(data, "devMacAddr");
+            cJSON* firmwareVersion = cJSON_GetObjectItemCaseSensitive(data, "firmwareVersion");
+            cJSON* hardwareVersion = cJSON_GetObjectItemCaseSensitive(data, "hardwareVersion");
+
+            printf("Device Name: %s\n", devName ? devName->valuestring : "N/A");
+            printf("Device Type: %d\n", devType ? devType->valueint : -1);
+            printf("MAC Address: %s\n", devMacAddr ? devMacAddr->valuestring : "N/A");
+            printf("Firmware Version: %s\n", firmwareVersion ? firmwareVersion->valuestring : "N/A");
+            printf("Hardware Version: %s\n", hardwareVersion ? hardwareVersion->valuestring : "N/A");
+
+            // Parse nested fields (e.g., sdcode, plantAi)
+            cJSON* sdcode = cJSON_GetObjectItemCaseSensitive(data, "sdcode");
+            if (sdcode) {
+                cJSON* sdStatus = cJSON_GetObjectItemCaseSensitive(sdcode, "sdStatus");
+                cJSON* capacity = cJSON_GetObjectItemCaseSensitive(sdcode, "capacity");
+                cJSON* usage = cJSON_GetObjectItemCaseSensitive(sdcode, "usage");
+
+                printf("SD Status: %d\n", sdStatus ? sdStatus->valueint : -1);
+                printf("SD Capacity: %d MB\n", capacity ? capacity->valueint : -1);
+                printf("SD Usage: %d MB\n", usage ? usage->valueint : -1);
+            }
+
+            // Add similar parsing for other nested fields (e.g., plantAi, autoPhoto)
+        }
+
+        cJSON_Delete(root);
+        return 0;
+    }
     if (strstr(json_response, "\"code\":200") != NULL) { printf("[SUCCESS] Command executed successfully\n"); return 0; }
     if (strstr(json_response, "\"ack\":true") != NULL) { printf("[INFO] Command acknowledged\n"); return 0; }
     return 0;
@@ -381,7 +417,8 @@ void on_snapshot_img_clicked(void* user_data) {
     printf("[Snapshot] Session Handle: 0x%08X\n", ctx->session_handle);
     
     char json_request[512];
-    snprintf(json_request, sizeof(json_request), "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SNAPSHOT_IMG\",\"id\":\"%s\",\"user\":\"%s\"}", s_global_seq++, JSON_CMD_SNAPSHOT_IMG, g_client_id, g_client_user);
+    snprintf(json_request, sizeof(json_request), "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SNAPSHOT_IMG\",\"id\":\"%s\",\"user\":\"%s\"}", 
+        s_global_seq++, JSON_CMD_SNAPSHOT_IMG, g_client_id, g_client_user);
     printf("[Snapshot] JSON: %s\n", json_request);
     
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_SNAPSHOT_IMG) == 0) {
@@ -390,6 +427,32 @@ void on_snapshot_img_clicked(void* user_data) {
         printf("[Snapshot] ERROR: Failed to send snapshot command\n");
     }
     printf("[Snapshot] ===============================================\n");
+}
+
+void on_get_device_config_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[DeviceConfig] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[DeviceConfig] ========== GET DEVICE CONFIG BUTTON CLICKED =========="
+           "\n[DeviceConfig] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    char json_request[512];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SETTINGS_GET\",\"id\":\"%s\",\"user\":\"%s\"}",
+             s_global_seq++, CMD_GET_DEVICE_CONFIG, g_client_id, g_client_user);
+
+    printf("[DeviceConfig] JSON: %s\n", json_request);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_GET_DEVICE_CONFIG) == 0) {
+        printf("[DeviceConfig] SUCCESS: Device config request sent\n");
+    } else {
+        printf("[DeviceConfig] ERROR: Failed to send device config request\n");
+    }
+
+    printf("[DeviceConfig] ===============================================\n");
 }
 
 void on_command_triggered(int command_id, void* user_data) {
@@ -422,6 +485,10 @@ void on_command_triggered(int command_id, void* user_data) {
         case CMD_SNAPSHOT_IMG:
             printf("[Command] Handler: on_snapshot_img_clicked\n");
             on_snapshot_img_clicked(user_data);
+            break;
+        case CMD_GET_DEVICE_CONFIG:
+            printf("[Command] Handler: on_get_device_config_clicked\n");
+            on_get_device_config_clicked(user_data);
             break;
         default:
             printf("[Command] ERROR: Unknown command: 0x%X\n", command_id);

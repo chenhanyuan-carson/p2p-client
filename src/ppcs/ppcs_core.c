@@ -245,7 +245,13 @@ INT32 connect_to_device(const char* target_did, Config *config) {
     session_handle = PPCS_ConnectByServer(target_did, bEnableLanSearch, config->UDPPort, config->ServerString);
     if (session_handle < 0) { print_error("PPCS_ConnectByServer", session_handle); return -1; }
     INT32 ret = PPCS_Check(session_handle, &session_info);
-    if (ret == ERROR_PPCS_SUCCESSFUL) { /* print info omitted */ } else { print_error("PPCS_Check", ret); PPCS_Close(session_handle); return -1; }
+    if (ret == ERROR_PPCS_SUCCESSFUL) { /* print info omitted */ } 
+    else { 
+        printf("[ERROR] PPCS_Check failed after connect: %d\n", ret);
+        print_error("PPCS_Check", ret); 
+        PPCS_Close(session_handle); 
+        return -1; 
+    }
     return session_handle;
 }
 
