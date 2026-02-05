@@ -363,8 +363,11 @@ void on_playback_button_clicked(void* user_data) {
     printf("[Playback] Session Handle: 0x%08X\n", ctx->session_handle);
     
     char json_request[2048];
-    long long start_ts = 0; long long end_ts = 0;
-    snprintf(json_request, sizeof(json_request), "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_PLAYBACK_START\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%lld,\"endTime\":%lld}}", s_global_seq++, JSON_CMD_PLAYBACK_START, g_client_id, g_client_user, start_ts, end_ts);
+    time_t now = time(NULL);
+    long long start_ts = 1769352324;now - 12*3600;
+    long long end_ts = 1769352324+12*3600;
+    snprintf(json_request, sizeof(json_request), 
+    "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_PLAYBACK_START\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%lld,\"endTime\":%lld}}", s_global_seq++, JSON_CMD_PLAYBACK_START, g_client_id, g_client_user, start_ts, end_ts);
     printf("[Playback] JSON: %s\n", json_request);
     
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_PLAYBACK_START) == 0) {
@@ -388,7 +391,7 @@ void on_record_list_button_clicked(void* user_data) {
     clear_record_list();
     char json_request[2048];
     time_t now = time(NULL);
-    long long start_ts = now - 12*3600;
+    long long start_ts = now;// - 12*3600;
     long long end_ts = now;
     snprintf(json_request, sizeof(json_request), "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_RECORD_LIST_GET\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%lld,\"endTime\":%lld}}", s_global_seq++, 0x207, g_client_id, g_client_user, start_ts, end_ts);
     printf("[RecordList] JSON: %s\n", json_request);
@@ -455,16 +458,99 @@ void on_get_device_config_clicked(void* user_data) {
     printf("[DeviceConfig] ===============================================\n");
 }
 
+void on_get_sdcard_info_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[SDCard] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[SDCard] ========== GET SD CARD INFO BUTTON CLICKED =========="
+           "\n[SDCard] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    if (ctx->session_handle <= 0) {
+        printf("[SDCard] ERROR: Invalid session handle\n");
+        return;
+    }
+
+    char json_request[512];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SDCARD_GET\",\"id\":\"%s\",\"user\":\"%s\"}",
+             s_global_seq++, CMD_GET_SDCARD_INFO, g_client_id, g_client_user);
+
+    printf("[SDCard] JSON: %s\n", json_request);
+
+    int send_result = send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_GET_SDCARD_INFO);
+    if (send_result == 0) {
+        printf("[SDCard] SUCCESS: SD card info request sent\n");
+    } else {
+        printf("[SDCard] ERROR: Failed to send SD card info request, send_command returned %d\n", send_result);
+    }
+
+    printf("[SDCard] ===============================================\n");
+}
+
+void on_format_sdcard_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[SDCard] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[SDCard] ========== FORMAT SD CARD BUTTON CLICKED =========="
+           "\n[SDCard] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    char json_request[512];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SDCARD_FORMAT\",\"id\":\"%s\",\"user\":\"%s\"}",
+             s_global_seq++, CMD_SDCARD_FORMAT, g_client_id, g_client_user);
+
+    printf("[SDCard] JSON: %s\n", json_request);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_SDCARD_FORMAT) == 0) {
+        printf("[SDCard] SUCCESS: SD card format request sent\n");
+    } else {
+        printf("[SDCard] ERROR: Failed to send SD card format request\n");
+    }
+
+    printf("[SDCard] ===============================================\n");
+}
+
+void on_eject_sdcard_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[SDCard] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[SDCard] ========== EJECT SD CARD BUTTON CLICKED =========="
+           "\n[SDCard] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    char json_request[512];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SDCARD_POP\",\"id\":\"%s\",\"user\":\"%s\"}",
+             s_global_seq++, CMD_SDCARD_POP, g_client_id, g_client_user);
+
+    printf("[SDCard] JSON: %s\n", json_request);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_SDCARD_POP) == 0) {
+        printf("[SDCard] SUCCESS: SD card eject request sent\n");
+    } else {
+        printf("[SDCard] ERROR: Failed to send SD card eject request\n");
+    }
+
+    printf("[SDCard] ===============================================\n");
+}
+
 void on_command_triggered(int command_id, void* user_data) {
     AppContext* ctx = (AppContext*)user_data;
     if (!ctx) {
         printf("[Command] ERROR: Invalid context for command 0x%X\n", command_id);
         return;
     }
-    printf("[Command] ========== COMMAND TRIGGERED ==========\n");
-    printf("[Command] Command ID: 0x%X\n", command_id);
-    printf("[Command] Dispatching to handler...\n");
-    
+    printf("[Command] ========== COMMAND TRIGGERED =========="
+           "\n[Command] Command ID: 0x%X\n", command_id);
+
     switch (command_id) {
         case CMD_LIVE_START:
             printf("[Command] Handler: on_live_button_clicked\n");
@@ -489,6 +575,18 @@ void on_command_triggered(int command_id, void* user_data) {
         case CMD_GET_DEVICE_CONFIG:
             printf("[Command] Handler: on_get_device_config_clicked\n");
             on_get_device_config_clicked(user_data);
+            break;
+        case CMD_GET_SDCARD_INFO:
+            printf("[Command] Handler: on_get_sdcard_info_clicked\n");
+            on_get_sdcard_info_clicked(user_data);
+            break;
+        case CMD_SDCARD_FORMAT:
+            printf("[Command] Handler: on_format_sdcard_clicked\n");
+            on_format_sdcard_clicked(user_data);
+            break;
+        case CMD_SDCARD_POP:
+            printf("[Command] Handler: on_eject_sdcard_clicked\n");
+            on_eject_sdcard_clicked(user_data);
             break;
         default:
             printf("[Command] ERROR: Unknown command: 0x%X\n", command_id);

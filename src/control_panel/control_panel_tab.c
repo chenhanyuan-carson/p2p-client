@@ -20,6 +20,9 @@
 #define IDC_SNAPSHOT_IMG 1034
 #define IDC_STATUS_LABEL 2000
 #define IDC_GET_DEVICE_CONFIG 2001
+#define IDC_GET_SDCARD_INFO 2002
+#define IDC_SDCARD_FORMAT 2003
+#define IDC_SDCARD_POP 2004
 
 // 每个选项卡的控件
 typedef struct {
@@ -131,6 +134,15 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             break;
                         case IDC_GET_DEVICE_CONFIG:
                             cmd_id = CMD_GET_DEVICE_CONFIG;
+                            break;
+                        case IDC_GET_SDCARD_INFO:
+                            cmd_id = CMD_GET_SDCARD_INFO;
+                            break;
+                        case IDC_SDCARD_FORMAT:
+                            cmd_id = CMD_SDCARD_FORMAT;
+                            break;
+                        case IDC_SDCARD_POP:
+                            cmd_id = CMD_SDCARD_POP;
                             break;
                         default:
                             return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -294,53 +306,43 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
     }
     else if (tab_id == TAB_SETTINGS) {
         // 设置选项卡
-        // Adjust positions of buttons in the Settings tab to avoid overlap
-        int y_offset = 85;
+        // 调整设置选项卡的按钮布局为网格布局
+        int grid_columns = 2; // 每行按钮数量
+        int grid_spacing_x = 20; // 按钮水平间距
+        int grid_spacing_y = 10; // 按钮垂直间距
+        int button_width = 150;
         int button_height = 35;
-        int button_spacing = 10;
+        int start_x = 50; // 起始X坐标
+        int start_y = 85; // 起始Y坐标
 
-        HWND btn_save = CreateWindowW(
-            L"BUTTON", L"Save Settings",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            80, y_offset, 150, button_height,
-            parent, (HMENU)IDC_SETTINGS_SAVE,
-            GetModuleHandle(NULL), NULL
-        );
-        SendMessage(btn_save, WM_SETFONT, (WPARAM)hFont, TRUE);
+        HWND buttons[] = {
+            CreateWindowW(L"BUTTON", L"保存设置", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x, start_y, button_width, button_height, parent, (HMENU)IDC_SETTINGS_SAVE, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"恢复默认", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x + (button_width + grid_spacing_x), start_y, button_width, button_height, parent, (HMENU)IDC_SETTINGS_RESTORE, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"OTA 升级", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x, start_y + (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_SETTINGS_OTA, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"获取设备信息", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x + (button_width + grid_spacing_x), start_y + (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_GET_DEVICE_CONFIG, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"获取SD卡信息", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x, start_y + 2 * (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_GET_SDCARD_INFO, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"格式化SD卡", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x + (button_width + grid_spacing_x), start_y + 2 * (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_SDCARD_FORMAT, GetModuleHandle(NULL), NULL),
+            CreateWindowW(L"BUTTON", L"弹出SD卡", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x, start_y + 3 * (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_SDCARD_POP, GetModuleHandle(NULL), NULL)
+        };
 
-        HWND btn_restore = CreateWindowW(
-            L"BUTTON", L"Restore Default",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            80, y_offset + button_height + button_spacing, 150, button_height,
-            parent, (HMENU)IDC_SETTINGS_RESTORE,
-            GetModuleHandle(NULL), NULL
-        );
-        SendMessage(btn_restore, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        HWND btn_ota = CreateWindowW(
-            L"BUTTON", L"OTA Upgrade",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            80, y_offset + 2 * (button_height + button_spacing), 150, button_height,
-            parent, (HMENU)IDC_SETTINGS_OTA,
-            GetModuleHandle(NULL), NULL
-        );
-        SendMessage(btn_ota, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        HWND btnGetDeviceConfig = CreateWindow(
-            "BUTTON", "Get Device Info", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            80, y_offset + 3 * (button_height + button_spacing), 150, button_height,
-            parent, (HMENU)IDC_GET_DEVICE_CONFIG, (HINSTANCE)GetWindowLongPtr(parent, GWLP_HINSTANCE), NULL);
-        if (!btnGetDeviceConfig) {
-            printf("[UI] ERROR: Failed to create Get Device Info button\n");
+        for (int i = 0; i < 7; i++) {
+            if (!buttons[i]) {
+                printf("[UI] ERROR: 无法创建按钮 %d\n", i);
+            } else {
+                SendMessage(buttons[i], WM_SETFONT, (WPARAM)hFont, TRUE);
+            }
         }
-        SendMessage(btnGetDeviceConfig, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        tab->button_count = 4;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 4);
-        tab->buttons[0] = btn_save;
-        tab->buttons[1] = btn_restore;
-        tab->buttons[2] = btn_ota;
-        tab->buttons[3] = btnGetDeviceConfig;
+        tab->button_count = 7;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 7);
+        memcpy(tab->buttons, buttons, sizeof(buttons));
     }
 }
 
@@ -470,37 +472,8 @@ ControlPanel* control_panel_create_tabbed(const char* title,
  */
 void control_panel_update_status(ControlPanel* panel, int tab_id, const wchar_t* status_text) {
     if (!panel || tab_id < 0 || tab_id >= TAB_COUNT) return;
-    
+
     if (panel->tabs[tab_id].status_label) {
         SetWindowTextW(panel->tabs[tab_id].status_label, status_text);
-    }
-}
-
-/**
- * 启用/禁用命令
- */
-void control_panel_enable_command(ControlPanel* panel, int command_id, int enabled) {
-    if (!panel) return;
-    
-    int control_id = -1;
-    switch (command_id) {
-        case CMD_LIVE_START: control_id = IDC_LIVE_START; break;
-        case CMD_LIVE_STOP: control_id = IDC_LIVE_STOP; break;
-        case CMD_PLAYBACK_START: control_id = IDC_PLAYBACK_START; break;
-        case CMD_PLAYBACK_STOP: control_id = IDC_PLAYBACK_STOP; break;
-        case CMD_PLAYBACK_PAUSE: control_id = IDC_PLAYBACK_PAUSE; break;
-        case CMD_PLAYBACK_RESUME: control_id = IDC_PLAYBACK_RESUME; break;
-        case CMD_RECORD_LIST_GET: control_id = IDC_RECORD_LIST; break;
-        case CMD_RECORD_PLAY: control_id = IDC_RECORD_PLAY; break;
-        case CMD_SNAPSHOT_IMG: control_id = IDC_SNAPSHOT_IMG; break;
-        case CMD_SETTINGS_SAVE: control_id = IDC_SETTINGS_SAVE; break;
-        case CMD_SETTINGS_RESTORE: control_id = IDC_SETTINGS_RESTORE; break;
-        case CMD_OTA_UPGRADE: control_id = IDC_SETTINGS_OTA; break;
-        default: return;
-    }
-    
-    HWND hwnd = GetDlgItem(panel->hwnd, control_id);
-    if (hwnd) {
-        EnableWindow(hwnd, enabled);
     }
 }

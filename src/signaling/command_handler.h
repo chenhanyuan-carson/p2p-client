@@ -57,6 +57,9 @@ int build_command_package(const char* json_data, unsigned char* package, int max
 
 // App callbacks exposed to control panel
 void on_command_triggered(int command_id, void* user_data);
+void on_get_sdcard_info_clicked(void* user_data);
+void on_format_sdcard_clicked(void* user_data);
+void on_eject_sdcard_clicked(void* user_data);
 
 // Record list utilities
 void init_record_list(void);

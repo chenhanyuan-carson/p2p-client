@@ -14,6 +14,11 @@ typedef void (*TabChangedCallback)(int tab_id, void* user_data);
 typedef enum {
     CMD_GET_DEVICE_CONFIG = 0x02,
 
+// Define CMD_SDCARD_* constants
+    CMD_GET_SDCARD_INFO = 0x16,
+    CMD_SDCARD_FORMAT = 0x17,
+    CMD_SDCARD_POP = 0x18,
+
     CMD_LIVE_START = 0x101,
     CMD_LIVE_STOP = 0x102,
     
