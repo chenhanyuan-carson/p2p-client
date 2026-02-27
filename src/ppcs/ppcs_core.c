@@ -157,8 +157,9 @@ static DWORD WINAPI network_reader_thread(LPVOID lpParam) {
                 int is_json = (memcmp(recv_buffer, "#nsj", 4) == 0);
                 int is_video = (memcmp(recv_buffer, "$div", 4) == 0);
                 int is_image = (memcmp(recv_buffer, "$gmi", 4) == 0);
+                int is_timelapse = (memcmp(recv_buffer, "@lif", 4) == 0);
                 
-                if (!is_json && !is_video && !is_image) {
+                if (!is_json && !is_video && !is_image && !is_timelapse) {
                     printf("[Network] Invalid package header at offset 0, skipping 1 byte\n");
                     memmove(recv_buffer, recv_buffer + 1, buffer_data_len - 1);
                     buffer_data_len--;

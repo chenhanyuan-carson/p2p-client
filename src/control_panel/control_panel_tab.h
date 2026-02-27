@@ -12,35 +12,37 @@ typedef void (*TabChangedCallback)(int tab_id, void* user_data);
 
 // 命令 ID 定义（用于区分不同的交互）
 typedef enum {
-    CMD_GET_DEVICE_CONFIG = 0x02,
-
-// Define CMD_SDCARD_* constants
-    CMD_GET_SDCARD_INFO = 0x16,
-    CMD_SDCARD_FORMAT = 0x17,
-    CMD_SDCARD_POP = 0x18,
-
+    // Live Tab
     CMD_LIVE_START = 0x101,
     CMD_LIVE_STOP = 0x102,
     
-    CMD_PLAYBACK_START = 0x201,
-    CMD_PLAYBACK_STOP = 0x202,
-    CMD_PLAYBACK_PAUSE = 0x203,
-    CMD_PLAYBACK_RESUME = 0x204,
+    // Record Tab
+    CMD_GET_RECORDS_LIST = 0x207,
+    CMD_PLAYBACK_RECORDS = 0x208,
+    CMD_RECORD_STOP = 0x209,
     
-    CMD_RECORD_LIST_GET = 0x301,
-    CMD_RECORD_PLAY = 0x302,
+    // TC Tab (Timelapse & Capture)
     CMD_SNAPSHOT_IMG = 0x313,
+    CMD_GET_TIMELAPSE_LIST = 0x302,
+    CMD_TIMELAPSE_DOWNLOAD = 0x303,
+    CMD_TIMELAPSE_START = 0x304,
+    CMD_TIMELAPSE_STOP = 0x305,
     
-    CMD_SETTINGS_SAVE = 0x401,
-    CMD_SETTINGS_RESTORE = 0x402,
+    // Settings Tab
+    CMD_SETTINGS_RESTART = 0x401,
+    CMD_SETTINGS_RESET = 0x402,
     CMD_OTA_UPGRADE = 0x011,
+    CMD_GET_DEVICE_CONFIG = 0x02,
+    CMD_GET_SDCARD_INFO = 0x16,
+    CMD_SDCARD_FORMAT = 0x17,
+    CMD_SDCARD_POP = 0x18,
 } CommandID;
 
 // 选项卡 ID
 typedef enum {
     TAB_LIVE = 0,
-    TAB_PLAYBACK = 1,
-    TAB_RECORD = 2,
+    TAB_RECORD = 1,
+    TAB_TC = 2,           // Timelapse & Capture
     TAB_SETTINGS = 3,
     TAB_COUNT = 4,
 } TabID;

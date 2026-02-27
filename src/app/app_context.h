@@ -9,6 +9,7 @@ typedef struct {
     VideoStreamManager* video_mgr;
     int live_started;
     int playback_started;
+    int timelapse_recording;
 } AppContext;
 
 #endif // APP_CONTEXT_H

@@ -57,15 +57,11 @@ int build_command_package(const char* json_data, unsigned char* package, int max
 
 // App callbacks exposed to control panel
 void on_command_triggered(int command_id, void* user_data);
-void on_get_sdcard_info_clicked(void* user_data);
-void on_format_sdcard_clicked(void* user_data);
-void on_eject_sdcard_clicked(void* user_data);
 
 // Record list utilities
 void init_record_list(void);
 void clear_record_list(void);
 void destroy_record_list(void);
 void add_record_item(const char* start_time, const char* end_time, int rec_type, long long start_ts, long long end_ts, unsigned int size, int frame_rate, int code_type);
-
 
 #endif // COMMAND_HANDLER_H

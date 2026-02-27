@@ -10,6 +10,7 @@
 #include "app_context.h"
 #include "control_panel.h"
 #include "control_panel_tab.h"
+#include "timelapse_manager.h"
 #include "cJSON.h"
 
 int main(int argc, char* argv[]) {
@@ -46,7 +47,7 @@ int main(int argc, char* argv[]) {
     if (ppcs_start_network(session_handle) != 0) { printf("[WARN] Failed to start network thread\n"); }
 
     VideoStreamManager* video_mgr = create_video_stream_manager("output_video");
-    AppContext app_ctx = {0}; app_ctx.session_handle = session_handle; app_ctx.video_mgr = video_mgr; app_ctx.live_started = 0; app_ctx.playback_started = 0;
+    AppContext app_ctx = {0}; app_ctx.session_handle = session_handle; app_ctx.video_mgr = video_mgr; app_ctx.live_started = 0; app_ctx.playback_started = 0; app_ctx.timelapse_recording = 0;
 
     ControlPanel* panel = control_panel_create_tabbed("P2P Client", on_command_triggered, &app_ctx);
     if (!panel) { destroy_video_stream_manager(video_mgr); PPCS_Close(session_handle); PPCS_DeInitialize(); return -1; }
@@ -63,9 +64,14 @@ int main(int argc, char* argv[]) {
             int is_json = (memcmp(pkg, "#nsj", 4) == 0);
             int is_image = (memcmp(pkg, "$gmi", 4) == 0);
             int is_video = (memcmp(pkg, "$div", 4) == 0);
+            int is_timelapse = (memcmp(pkg, "@lif", 4) == 0);
             if (is_json) handle_command_package(pkg, pkg_len);
             else if (is_image) handle_image_package(pkg, pkg_len);
             else if (is_video) handle_video_package(video_mgr, pkg, pkg_len);
+            else if (is_timelapse) {
+                printf("[Main] Received timelapse package (%d bytes)\n", pkg_len);
+                handle_timelapse_package(pkg, pkg_len);
+            }
             free(pkg); free(node); processed++; }
         Sleep(1);
     }

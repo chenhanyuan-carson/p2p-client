@@ -19,6 +19,7 @@ SOURCES = \
 	src/ppcs/ppcs_core.c \
 	src/signaling/command_handler.c \
 	src/image/image_handler.c \
+	src/image/timelapse_manager.c \
 	src/video/video_manager.c \
 	src/video/video_decoder.c \
 	src/video/video_display.c \
@@ -50,7 +51,7 @@ $(OBJECTS): %.o: %.c
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@if exist *.o del /Q *.o 2>nul
+	@for /r . %%F in (*.o) do @if exist "%%F" del /Q "%%F" 2>nul
 	@if exist $(BIN_DIR) rmdir /S /Q $(BIN_DIR) 2>nul
 	@echo "Clean complete!"
 
