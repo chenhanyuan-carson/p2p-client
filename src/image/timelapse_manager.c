@@ -26,6 +26,7 @@ int handle_timelapse_package(const unsigned char* package, int pkg_len) {
         int used_len;
         int8_t file_type;
         int8_t frame_type;
+        int32_t timestamp;
         int valid;
     } FrameBuffer;
     
@@ -58,9 +59,9 @@ int handle_timelapse_package(const unsigned char* package, int pkg_len) {
         offset += sizeof(TAG_PKG_FILE_HEADER_S);
 
         // Log frame info
-        printf("[Timelapse] New frame: TaskId=%d, FileType=%d, FrameType=%d, FileLen=%d\n",
+        printf("[Timelapse] New frame: TaskId=%d, FileType=%d, FrameType=%d, FileLen=%d, StartTime=%d\n",
             file_header->s32TaskId, file_header->s8FileType, 
-            file_header->s8FrameType, file_header->s32FileLength);
+            file_header->s8FrameType, file_header->s32FileLength, file_header->s32StartTime);
 
         // Initialize frame reassembly buffer
         frame_buf.pkg_id = header->u16PkgId;
@@ -68,6 +69,7 @@ int handle_timelapse_package(const unsigned char* package, int pkg_len) {
         frame_buf.file_type = file_header->s8FileType;
         frame_buf.frame_type = file_header->s8FrameType;
         frame_buf.total_len = file_header->s32FileLength;
+        frame_buf.timestamp = file_header->s32StartTime;
         frame_buf.used_len = 0;
         frame_buf.valid = 1;
 
@@ -83,8 +85,17 @@ int handle_timelapse_package(const unsigned char* package, int pkg_len) {
             if (frame_buf.valid && frame_buf.used_len > 0) {
                 // Save frame to file
                 char filename[256];
-                const char* ext = (frame_buf.file_type == 1) ? "h265" : "h264";
-                snprintf(filename, sizeof(filename), "timelapse_%d.%s", 
+                const char* ext;
+                switch (frame_buf.file_type) {
+                    case 1: ext = "h265"; break;
+                    case 2: ext = "h264"; break;
+                    case 3: ext = "pcm";  break;
+                    case 4: ext = "g711a"; break;
+                    case 5: ext = "g711u"; break;
+                    case 6: ext = "aac";  break;
+                    default: ext = "bin"; break;
+                }
+                snprintf(filename, sizeof(filename), "timelapse_%d.%s",
                          frame_buf.task_id, ext);
                 
                 FILE* out = fopen(filename, "ab");
@@ -121,8 +132,17 @@ int handle_timelapse_package(const unsigned char* package, int pkg_len) {
             if (frame_buf.valid && frame_buf.used_len > 0) {
                 // Save complete frame to file
                 char filename[256];
-                const char* ext = (frame_buf.file_type == 1) ? "h265" : "h264";
-                snprintf(filename, sizeof(filename), "timelapse_%d.%s", 
+                const char* ext;
+                switch (frame_buf.file_type) {
+                    case 1: ext = "h265";  break;
+                    case 2: ext = "h264";  break;
+                    case 3: ext = "pcm";   break;
+                    case 4: ext = "g711a"; break;
+                    case 5: ext = "g711u"; break;
+                    case 6: ext = "aac";   break;
+                    default: ext = "bin";  break;
+                }
+                snprintf(filename, sizeof(filename), "timelapse_%d.%s",
                          frame_buf.task_id, ext);
                 
                 FILE* out = fopen(filename, "ab");

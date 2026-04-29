@@ -260,12 +260,19 @@ void control_panel_destroy(ControlPanel* panel) {
         printf("[Debug] Destroying window with hwnd: %p\n", panel->hwnd);
     }
     if (!panel) return;
-    
+
     if (panel->hwnd) {
         printf("[Debug] DestroyWindow called in control_panel for hwnd: %p\n", panel->hwnd);
         DestroyWindow(panel->hwnd);
     }
-    
+
+    // 释放共享字体（由 control_panel_tab.c 创建）
+    extern HFONT g_hFont;
+    if (g_hFont) {
+        DeleteObject(g_hFont);
+        g_hFont = NULL;
+    }
+
     g_panel = NULL;
     free(panel);
     

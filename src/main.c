@@ -69,9 +69,9 @@ int main(int argc, char* argv[]) {
             else if (is_image) handle_image_package(pkg, pkg_len);
             else if (is_video) handle_video_package(video_mgr, pkg, pkg_len);
             else if (is_timelapse) {
-                printf("[Main] Received timelapse package (%d bytes)\n", pkg_len);
+                //printf("[Main] Received timelapse package (%d bytes)\n", pkg_len);
                 handle_timelapse_package(pkg, pkg_len);
-            }
+            } else { printf("[Main] WARNING: Received unknown package type (first 4 bytes: %c%c%c%c)\n", pkg[0], pkg[1], pkg[2], pkg[3]); }
             free(pkg); free(node); processed++; }
         Sleep(1);
     }

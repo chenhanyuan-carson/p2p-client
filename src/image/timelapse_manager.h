@@ -10,6 +10,7 @@ typedef struct {
     uint8_t u8Reserve[2];       // 保留
     int32_t s32FileLength;      // 文件大小
     int32_t s32TaskId;          // 任务ID，下载文件时使用
+    int32_t s32StartTime;       // 录像开始时间，Unix时间戳
 } TAG_PKG_FILE_HEADER_S;
 
 // 处理延时摄影包（类似 handle_video_package）

@@ -204,6 +204,22 @@ int handle_command_package(const unsigned char* package, int pkg_len) {
         cJSON_Delete(root);
         return 0;
     }
+    if (header->u16PkgCmd == JSON_CMD_TIMELAPSE_DOWNLOAD_END) {
+        cJSON* root = cJSON_Parse(json_response);
+        if (!root) {
+            printf("[Timelapse] DOWNLOAD_END response parse failed\n");
+            return -1;
+        }
+
+        cJSON* code = cJSON_GetObjectItemCaseSensitive(root, "code");
+        cJSON* msg = cJSON_GetObjectItemCaseSensitive(root, "msg");
+        printf("[Timelapse] DOWNLOAD_END response: code=%d, msg=%s\n",
+               cJSON_IsNumber(code) ? code->valueint : -1,
+               (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring : "N/A");
+
+        cJSON_Delete(root);
+        return 0;
+    }
     if (strstr(json_response, "\"code\":200") != NULL) { printf("[SUCCESS] Command executed successfully\n"); return 0; }
     if (strstr(json_response, "\"ack\":true") != NULL) { printf("[INFO] Command acknowledged\n"); return 0; }
     return 0;
@@ -364,8 +380,8 @@ void on_playback_button_clicked(void* user_data) {
     printf("[Playback] Session Handle: 0x%08X\n", ctx->session_handle);
     
     char json_request[2048];
-    long long start_ts = 1770541120-60;//now - 12*3600;
-    long long end_ts = 1770541120;//1769352324+12*3600;
+    long long start_ts = 1775636693;//now - 12*3600;
+    long long end_ts = 1775637284;//1769352324+12*3600;
     snprintf(json_request, sizeof(json_request), 
     "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_PLAYBACK_START\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%lld,\"endTime\":%lld}}", s_global_seq++, JSON_CMD_PLAYBACK_START, g_client_id, g_client_user, start_ts, end_ts);
     printf("[Playback] JSON: %s\n", json_request);
@@ -415,7 +431,7 @@ void on_ota_upgrade_clicked(void* user_data) {
     printf("[OTA] ========== OTA UPGRADE BUTTON CLICKED ==========\n");
     printf("[OTA] Session Handle: 0x%08X\n", ctx->session_handle);
 
-    char *url = "http://192.168.0.26/88ffac38-8ca4-464d-bb08-af67790bf965.bin";
+    char *url = "http://192.168.0.26/2dc5b78a-098e-4f17-9885-f122f0207b2f.bin";
     char json_request[512];
     snprintf(json_request, sizeof(json_request),
              "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_OTA\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"url\":\"%s\",\"version\":\"1.0.0\", \"size\":0}}", 
@@ -444,7 +460,7 @@ void on_snapshot_img_clicked(void* user_data) {
     char json_request[512];
     snprintf(json_request, sizeof(json_request), "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_SNAPSHOT_IMG\",\"id\":\"%s\",\"user\":\"%s\"}", 
         s_global_seq++, JSON_CMD_SNAPSHOT_IMG, g_client_id, g_client_user);
-    printf("[Snapshot] JSON: %s\n", json_request);
+    printf("[Snapshot] send JSON: %s\n", json_request);
     
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_SNAPSHOT_IMG) == 0) {
         printf("[Snapshot] SUCCESS: Snapshot command sent\n");
@@ -478,6 +494,32 @@ void on_get_device_config_clicked(void* user_data) {
     }
 
     printf("[DeviceConfig] ===============================================\n");
+}
+
+void on_telnet_enable_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[Telnet] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[Telnet] ========== TELNET ENABLE BUTTON CLICKED ==========%s\n", "");
+    printf("[Telnet] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    char json_request[1024];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":20481,\"def\":\"JSON_CMD_TELNET_ENABLE_REQUEST\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"allow_ip\":\"192.168.8.100\",\"expire_seconds\":3600,\"temp_password\":\"SecurePass123!\",\"proxy_port\":9023}}",
+             s_global_seq++, g_client_id, g_client_user);
+
+    printf("[Telnet] JSON: %s\n", json_request);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_TELNET_ENABLE_REQUEST) == 0) {
+        printf("[Telnet] SUCCESS: Telnet enable request sent\n");
+    } else {
+        printf("[Telnet] ERROR: Failed to send telnet enable request\n");
+    }
+
+    printf("[Telnet] ==================================================\n");
 }
 
 void on_get_sdcard_info_clicked(void* user_data) {
@@ -568,56 +610,86 @@ void on_eject_sdcard_clicked(void* user_data) {
 void on_get_timelapse_list_clicked(void* user_data) {
     AppContext* ctx = (AppContext*)user_data;
     if (!ctx) {
-        printf("[SDCard] ERROR: Invalid context\n");
+        printf("[Timelapse] ERROR: Invalid context\n");
         return;
     }
 
-    printf("[SDCard] ========== EJECT SD CARD BUTTON CLICKED =========="
-           "\n[SDCard] Session Handle: 0x%08X\n", ctx->session_handle);
+    printf("[Timelapse] ========== GET TIMELAPSE LIST BUTTON CLICKED =========="
+           "\n[Timelapse] Session Handle: 0x%08X\n", ctx->session_handle);
 
     char json_request[512];
     snprintf(json_request, sizeof(json_request),
              "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_TIMELAPSE_LIST\",\"id\":\"%s\",\"user\":\"%s\"}",
              s_global_seq++, CMD_GET_TIMELAPSE_LIST, g_client_id, g_client_user);
 
-    printf("[SDCard] JSON: %s\n", json_request);
+    printf("[Timelapse] JSON: %s\n", json_request);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_GET_TIMELAPSE_LIST) == 0) {
-        printf("[SDCard] SUCCESS: SD card eject request sent\n");
+        printf("[Timelapse] SUCCESS: Timelapse list request sent\n");
     } else {
-        printf("[SDCard] ERROR: Failed to send SD card eject request\n");
+        printf("[Timelapse] ERROR: Failed to send timelapse list request\n");
     }
 
-    printf("[SDCard] ===============================================\n");
+    printf("[Timelapse] ===============================================\n");
 }
 
 void on_download_timelapse_clicked(AppContext* app_context) {
     AppContext* ctx = (AppContext*)app_context;
     if (!ctx) {
-        printf("[SDCard] ERROR: Invalid context\n");
+        printf("[Timelapse] ERROR: Invalid context\n");
         return;
     }
 
-    printf("[SDCard] ========== EJECT SD CARD BUTTON CLICKED =========="
-           "\n[SDCard] Session Handle: 0x%08X\n", ctx->session_handle);
+    printf("[Timelapse] ========== DOWNLOAD TIMELAPSE BUTTON CLICKED =========="
+           "\n[Timelapse] Session Handle: 0x%08X\n", ctx->session_handle);
 
-    long long start_ts = 1770534448;// - 12*3600;
-    long long end_ts = 1770534448 + 60;
+    // TODO: startTime and taskId should come from the timelapse list selection
+    //long long start_ts = 1770534448;
+    //long long task_id = 1770534448;
 
     char json_request[512];
     snprintf(json_request, sizeof(json_request),
-             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_TIMELAPSE_LIST\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%lld,\"taskId\":%lld}}",
-             s_global_seq++, CMD_GET_TIMELAPSE_LIST, g_client_id, g_client_user, start_ts, end_ts);
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_TIMELAPSE_DOWNLOAD\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"startTime\":%d,\"endTime\":%d,\"taskId\":%d}}",
+             s_global_seq++, CMD_TIMELAPSE_DOWNLOAD, g_client_id, g_client_user, 1775551740, 1775552114, 11989);
 
-    printf("[SDCard] JSON: %s\n", json_request);
+    printf("[Timelapse] JSON: %s\n", json_request);
 
     if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, CMD_TIMELAPSE_DOWNLOAD) == 0) {
-        printf("[SDCard] SUCCESS: SD card eject request sent\n");
+        printf("[Timelapse] SUCCESS: Timelapse download request sent\n");
     } else {
-        printf("[SDCard] ERROR: Failed to send SD card eject request\n");
+        printf("[Timelapse] ERROR: Failed to send timelapse download request\n");
     }
 
-    printf("[SDCard] ===============================================\n");
+    printf("[Timelapse] ===============================================\n");
+}
+
+void on_download_timelapse_end_clicked(void* user_data) {
+    AppContext* ctx = (AppContext*)user_data;
+    if (!ctx) {
+        printf("[Timelapse] ERROR: Invalid context\n");
+        return;
+    }
+
+    printf("[Timelapse] ========== END TIMELAPSE DOWNLOAD BUTTON CLICKED =========="
+           "\n[Timelapse] Session Handle: 0x%08X\n", ctx->session_handle);
+
+    // TODO: taskId should come from the current download task
+    long long task_id = 11989;
+
+    char json_request[512];
+    snprintf(json_request, sizeof(json_request),
+             "{\"version\":\"1.0\",\"ack\":false,\"seq\":%d,\"cmd\":%d,\"def\":\"JSON_CMD_TIMELAPSE_DOWNLOAD_END\",\"id\":\"%s\",\"user\":\"%s\",\"data\":{\"taskId\":%lld}}",
+             s_global_seq++, JSON_CMD_TIMELAPSE_DOWNLOAD_END, g_client_id, g_client_user, task_id);
+
+    printf("[Timelapse] JSON: %s\n", json_request);
+
+    if (send_command(ctx->session_handle, json_request, s_global_pkg_id++, JSON_CMD_TIMELAPSE_DOWNLOAD_END) == 0) {
+        printf("[Timelapse] SUCCESS: Timelapse download end request sent\n");
+    } else {
+        printf("[Timelapse] ERROR: Failed to send timelapse download end request\n");
+    }
+
+    printf("[Timelapse] ===========================================================\n");
 }
 
 void on_start_timelapse_clicked(void* user_data) {
@@ -732,6 +804,10 @@ void on_command_triggered(int command_id, void* user_data) {
             printf("[Command] Handler: on_download_timelapse_clicked\n");
             on_download_timelapse_clicked(user_data);
             break;
+        case CMD_TIMELAPSE_DOWNLOAD_END:
+            printf("[Command] Handler: on_download_timelapse_end_clicked\n");
+            on_download_timelapse_end_clicked(user_data);
+            break;
         case CMD_TIMELAPSE_START:
             printf("[Command] Handler: on_start_timelapse_clicked\n");
             on_start_timelapse_clicked(user_data);
@@ -751,6 +827,10 @@ void on_command_triggered(int command_id, void* user_data) {
         case CMD_SETTINGS_RESET:
             printf("[Command] Handler: Device reset (not yet implemented)\n");
             // TODO: Implement device reset handler
+            break;
+        case CMD_TELNET_ENABLE:
+            printf("[Command] Handler: on_telnet_enable_clicked\n");
+            on_telnet_enable_clicked(user_data);
             break;
         default:
             printf("[Command] ERROR: Unknown command: 0x%X\n", command_id);

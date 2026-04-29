@@ -20,6 +20,7 @@
 #define IDC_TIMELAPSE_STOP 1025
 #define IDC_TIMELAPSE_LIST 1026
 #define IDC_TIMELAPSE_DOWNLOAD 1027
+#define IDC_TIMELAPSE_DOWNLOAD_END 1029
 
 // Settings Tab IDs
 #define IDC_SETTINGS_RESTART 1031
@@ -29,6 +30,7 @@
 #define IDC_GET_SDCARD_INFO 1035
 #define IDC_SDCARD_FORMAT 1036
 #define IDC_SDCARD_POP 1037
+#define IDC_TELNET_ENABLE 1038
 
 #define IDC_STATUS_LABEL 2000
 
@@ -55,6 +57,7 @@ struct ControlPanel {
 
 // 全局变量
 static ControlPanel* g_panel = NULL;
+HFONT g_hFont = NULL;
 
 // 窗口过程
 LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -134,6 +137,9 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                         case IDC_TIMELAPSE_DOWNLOAD:
                             cmd_id = CMD_TIMELAPSE_DOWNLOAD;
                             break;
+                        case IDC_TIMELAPSE_DOWNLOAD_END:
+                            cmd_id = CMD_TIMELAPSE_DOWNLOAD_END;
+                            break;
                         case IDC_SETTINGS_RESTART:
                             cmd_id = CMD_SETTINGS_RESTART;
                             break;
@@ -154,6 +160,9 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             break;
                         case IDC_SDCARD_POP:
                             cmd_id = CMD_SDCARD_POP;
+                            break;
+                        case IDC_TELNET_ENABLE:
+                            cmd_id = CMD_TELNET_ENABLE;
                             break;
                         default:
                             return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -191,10 +200,7 @@ LRESULT CALLBACK ControlPanelTabWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 static void create_tab_page(ControlPanel* panel, int tab_id) {
     TabPage* tab = &panel->tabs[tab_id];
     HWND parent = panel->hwnd;
-    HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                              L"Microsoft YaHei");
+    HFONT hFont = g_hFont;
     
     // 状态标签
     tab->status_label = CreateWindowW(
@@ -271,7 +277,7 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
         tab->buttons[2] = btn_record_stop;
     }
     else if (tab_id == TAB_TC) {
-        // TC Tab - 延时摄影和抓拍 (5 个按钮)
+        // TC Tab - 延时摄影和抓拍 (6 个按钮)
         // 第一行: 延时摄影
         HWND btn_timelapse_start = CreateWindowW(
             L"BUTTON", L"TL Start",
@@ -309,23 +315,33 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
         );
         SendMessage(btn_timelapse_download, WM_SETFONT, (WPARAM)hFont, TRUE);
 
+        HWND btn_timelapse_download_end = CreateWindowW(
+            L"BUTTON", L"TL End",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            25, y_pos + 45, 100, 32,
+            parent, (HMENU)IDC_TIMELAPSE_DOWNLOAD_END,
+            GetModuleHandle(NULL), NULL
+        );
+        SendMessage(btn_timelapse_download_end, WM_SETFONT, (WPARAM)hFont, TRUE);
+
         // 第二行: 抓拍
         HWND btn_snapshot = CreateWindowW(
             L"BUTTON", L"Snapshot",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            25, y_pos + 45, 120, 32,
+            140, y_pos + 45, 120, 32,
             parent, (HMENU)IDC_SNAPSHOT_IMG,
             GetModuleHandle(NULL), NULL
         );
         SendMessage(btn_snapshot, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        tab->button_count = 5;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 5);
+        tab->button_count = 6;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 6);
         tab->buttons[0] = btn_timelapse_start;
         tab->buttons[1] = btn_timelapse_stop;
         tab->buttons[2] = btn_timelapse_list;
         tab->buttons[3] = btn_timelapse_download;
-        tab->buttons[4] = btn_snapshot;
+        tab->buttons[4] = btn_timelapse_download_end;
+        tab->buttons[5] = btn_snapshot;
     }
     else if (tab_id == TAB_SETTINGS) {
         // Settings Tab - 网格布局 (7 个按钮)
@@ -351,6 +367,8 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
                           start_x + 2 * (button_width + grid_spacing_x), start_y + (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_SDCARD_FORMAT, GetModuleHandle(NULL), NULL),
             CreateWindowW(L"BUTTON", L"Eject SD", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                           start_x, start_y + 2 * (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_SDCARD_POP, GetModuleHandle(NULL), NULL)
+            ,CreateWindowW(L"BUTTON", L"Telnet Enable", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          start_x + (button_width + grid_spacing_x), start_y + 2 * (button_height + grid_spacing_y), button_width, button_height, parent, (HMENU)IDC_TELNET_ENABLE, GetModuleHandle(NULL), NULL)
         };
 
         for (int i = 0; i < 7; i++) {
@@ -361,8 +379,8 @@ static void create_tab_page(ControlPanel* panel, int tab_id) {
             }
         }
 
-        tab->button_count = 7;
-        tab->buttons = (HWND*)malloc(sizeof(HWND) * 7);
+        tab->button_count = 8;
+        tab->buttons = (HWND*)malloc(sizeof(HWND) * 8);
         memcpy(tab->buttons, buttons, sizeof(buttons));
     }
 }
@@ -386,7 +404,13 @@ ControlPanel* control_panel_create_tabbed(const char* title,
     panel->current_tab = 0;
     
     g_panel = panel;
-    
+
+    // 创建共享字体（所有 Tab 复用，避免每个 Tab 单独创建导致泄漏）
+    g_hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                          CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                          L"Microsoft YaHei");
+
     // 注册窗口类
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
@@ -498,3 +522,4 @@ void control_panel_update_status(ControlPanel* panel, int tab_id, const wchar_t*
         SetWindowTextW(panel->tabs[tab_id].status_label, status_text);
     }
 }
+
